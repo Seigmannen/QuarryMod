@@ -53,4 +53,4 @@ This mod is licensed under the [MIT License](LICENSE).
 
 ## Credits
 
-This mod is heavily inspired by [Simple Quarries Plus]([LENKE]). All code and textures in this mod were made from scratch.
+This mod is heavily inspired by [Simple Quarries Plus](https://modrinth.com/mod/simple-quarries-plus). All code and textures in this mod were made from scratch.
