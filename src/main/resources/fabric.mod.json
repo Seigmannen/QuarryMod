@@ -1,0 +1,38 @@
+{
+	"schemaVersion": 1,
+	"id": "quarrymod",
+	"version": "${version}",
+	"name": "Quarry Mod",
+	"description": "A simple 15x15 quarry that mines layer by layer down to the bottom of the world. Work in progress.",
+	"authors": [
+		"Seigmannen"
+	],
+	"contact": {
+		"homepage": "https://fabricmc.net/",
+		"sources": "https://github.com/FabricMC/fabric-example-mod"
+	},
+	"license": "MIT",
+	"icon": "assets/quarrymod/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.seigmannen.quarrymod.QuarryMod"
+		],
+		"client": [
+			"com.seigmannen.quarrymod.client.QuarryModClient"
+		]
+	},
+	"mixins": [
+		"quarrymod.mixins.json",
+		{
+			"config": "quarrymod.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

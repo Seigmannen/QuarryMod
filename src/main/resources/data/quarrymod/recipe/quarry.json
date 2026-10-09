@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "key": {
+    "X": "minecraft:redstone",
+    "C": "minecraft:iron_block",
+    "P": "minecraft:diamond_pickaxe",
+    "R": "minecraft:dropper"
+  },
+  "pattern": [
+    "XCX",
+    "PRP",
+    "XCX"
+  ],
+  "result": {
+    "id": "quarrymod:quarry"
+  }
+}

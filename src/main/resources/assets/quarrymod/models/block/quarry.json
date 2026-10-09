@@ -1,0 +1,12 @@
+{
+  "parent": "minecraft:block/cube",
+  "textures": {
+    "north": "quarrymod:block/quarry_front_running",
+    "south": "quarrymod:block/quarry_back",
+    "east": "quarrymod:block/quarry_side",
+    "west": "quarrymod:block/quarry_side",
+    "up": "quarrymod:block/quarry_top",
+    "down": "quarrymod:block/quarry_bottom",
+    "particle": "quarrymod:block/quarry_side"
+  }
+}
