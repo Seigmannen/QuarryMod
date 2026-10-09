@@ -8,9 +8,13 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.sounds.SoundEvents;
+import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.ItemTags;
+import net.minecraft.util.Mth;
 import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.WorldlyContainer;
@@ -19,7 +23,9 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ContainerData;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.Items;
+import net.minecraft.world.item.component.Tool;
+import net.minecraft.world.item.enchantment.EnchantmentHelper;
+import net.minecraft.world.item.enchantment.Enchantments;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
@@ -45,8 +51,18 @@ import net.minecraft.world.level.storage.ValueOutput;
  * Filteret er en egen liste med kopier og er IKKE en del av inventoryet (så det droppes ikke).
  */
 public class QuarryBlockEntity extends BaseContainerBlockEntity implements WorldlyContainer {
-	/** Hvor mange ticks det tar å mine én blokk (6 = diamantpickaxe på stein). Endre her for å justere farten. */
-	public static final int TICKS_PER_BLOCK = 6;
+	/**
+	 * Fartsfaktor: tiden per blokk = tiden pickaxen bruker på stein i vanilla, ganget med denne.
+	 * Endre her for å justere farten (høyere = tregere).
+	 */
+	public static final int SPEED_FACTOR = 10;
+
+	/** Stein (hardhet 1,5). Alle blokker mines med samme fart som denne. */
+	private static final float REFERENCE_HARDNESS = 1.5F;
+	private static final BlockState REFERENCE_BLOCK = Blocks.STONE.defaultBlockState();
+
+	/** Fremdriften telles fra 0 til 1; litt slingringsmonn for avrundingsfeil i float. */
+	private static final float PROGRESS_DONE = 1.0F - 1.0E-4F;
 
 	/** Størrelsen på området (15x15) og hvor langt det går til hver side fra midten (7). */
 	private static final int SIZE = 15;
@@ -54,9 +70,6 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 
 	/** Maks antall posisjoner som kan hoppes over i én tick (ett helt lag), for å unngå lag. */
 	private static final int MAX_SKIPS_PER_TICK = SIZE * SIZE;
-
-	/** Verktøyet dropsene regnes ut med: en vanlig diamantpickaxe uten enchantments. */
-	private static final ItemStack MINING_TOOL = new ItemStack(Items.DIAMOND_PICKAXE);
 
 	// --- Inventory ---
 	public static final int PICKAXE_SLOT = 0;
@@ -68,6 +81,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 
 	/** Slotsene en hopper under quarrien kan trekke fra (bare lageret). */
 	private static final int[] STORAGE_SLOTS = IntStream.range(STORAGE_START, CONTAINER_SIZE).toArray();
+	/** Slotten en hopper på baksiden kan sette inn i. */
+	private static final int[] PICKAXE_SLOTS = {PICKAXE_SLOT};
 	private static final int[] NO_SLOTS = new int[0];
 
 	// --- Status (synkroniseres til GUI-en via ContainerData) ---
@@ -126,7 +141,9 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	private int column = 0;    // 0 = A, 14 = O
 	private int row = 0;       // 0 = rad 1, 14 = rad 15
 	private int layer = 0;     // 0 = laget rett under quarrien (y - 1), 1 = y - 2, osv.
-	private int progress = 0;  // hvor mange ticks vi har jobbet på blokken vi holder på med
+	// Hvor langt vi har kommet på blokken vi holder på med (0 til 1). Lagres som andel, slik at
+	// fremdriften beholdes hvis pickaxen byttes, mens den nye farten gjelder for resten.
+	private float progress = 0.0F;
 	private boolean finished = false;
 
 	public QuarryBlockEntity(BlockPos pos, BlockState state) {
@@ -150,6 +167,11 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		if (state.getValue(QuarryBlock.POWERED)) {
 			return;
 		}
+		// Uten pickaxe står quarrien stille, men beholder posisjon og fremdrift.
+		ItemStack pickaxe = quarry.items.get(PICKAXE_SLOT);
+		if (pickaxe.isEmpty()) {
+			return;
+		}
 
 		int skipped = 0;
 		while (skipped < MAX_SKIPS_PER_TICK) {
@@ -158,7 +180,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 			// Har vi gått under bunnen av verden? Da er vi ferdige.
 			if (target.getY() < level.getMinY()) {
 				quarry.finished = true;
-				quarry.progress = 0;
+				quarry.progress = 0.0F;
 				quarry.setChanged();
 				markFinished(level, pos, state);
 				return;
@@ -177,16 +199,41 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 				continue;
 			}
 
-			// En blokk som skal mines: tell opp én tick.
-			quarry.progress++;
-			if (quarry.progress >= TICKS_PER_BLOCK) {
-				quarry.mineBlock(serverLevel, target, targetState);
+			// En blokk som skal mines: legg til én tick med pickaxens fart.
+			quarry.progress += 1.0F / ticksPerBlock(serverLevel, pickaxe);
+			if (quarry.progress >= PROGRESS_DONE) {
+				quarry.mineBlock(serverLevel, target, targetState, pickaxe);
 				quarry.advance();
 			}
 			break;
 		}
 		// Si fra til Minecraft at dataene er endret, slik at de blir lagret.
 		quarry.setChanged();
+	}
+
+	/**
+	 * Hvor mange ticks én blokk tar med denne pickaxen:
+	 * ceil(30 * 1,5 * SPEED_FACTOR / miningSpeed), minst 1. (Vanilla: 30 * hardhet / fart med riktig verktøy.)
+	 */
+	private static int ticksPerBlock(ServerLevel level, ItemStack pickaxe) {
+		// Farten på stein hentes fra itemets Tool-komponent, så det virker for alle pickaxer (også fra andre mods).
+		Tool tool = pickaxe.get(DataComponents.TOOL);
+		float miningSpeed = tool != null ? tool.getMiningSpeed(REFERENCE_BLOCK) : 1.0F;
+
+		// Efficiency: vanilla legger til nivå² + 1 når farten er over 1 (via spillerens attributt).
+		// Enchantments er data-drevne, så vi slår opp Efficiency i registeret.
+		if (miningSpeed > 1.0F) {
+			int efficiency = level.registryAccess().lookupOrThrow(Registries.ENCHANTMENT)
+					.get(Enchantments.EFFICIENCY)
+					.map(holder -> EnchantmentHelper.getItemEnchantmentLevel(holder, pickaxe))
+					.orElse(0);
+			if (efficiency > 0) {
+				miningSpeed += efficiency * efficiency + 1;
+			}
+		}
+
+		int ticks = Mth.ceil(30.0F * REFERENCE_HARDNESS * SPEED_FACTOR / miningSpeed);
+		return Math.max(1, ticks);
 	}
 
 	/** Setter FINISHED=true på blokken, slik at fronten bytter til "ferdig"-teksturen. */
@@ -223,7 +270,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	 * Går til neste rute: A1, B1 … O1, A2 … O15, og deretter ett lag ned.
 	 */
 	private void advance() {
-		progress = 0;
+		progress = 0.0F;
 		column++;
 		if (column >= SIZE) {
 			column = 0;
@@ -255,17 +302,24 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	}
 
 	/** Knuser blokken. Dropsene går inn i lageret, og det som ikke får plass, spyttes ut på toppen. */
-	private void mineBlock(ServerLevel level, BlockPos target, BlockState targetState) {
+	private void mineBlock(ServerLevel level, BlockPos target, BlockState targetState, ItemStack pickaxe) {
 		// Hent block entity (f.eks. for kister) FØR blokken fjernes, siden noen loot tables trenger den.
 		BlockEntity targetBlockEntity = level.getBlockEntity(target);
+		// Hardheten må leses før blokken fjernes (brukes til slitasjen under).
+		float hardness = targetState.getDestroySpeed(level, target);
 
-		// Regn ut dropsene som om en spiller knuste blokken med en diamantpickaxe.
-		List<ItemStack> drops = Block.getDrops(targetState, level, target, targetBlockEntity, null, MINING_TOOL);
+		// Dropsene regnes ut med selve pickaxen, så Silk Touch og Fortune virker.
+		// Som i vanilla: blokker som krever riktig verktøy (f.eks. diamond ore med steinpickaxe) gir ingenting.
+		List<ItemStack> drops = !targetState.requiresCorrectToolForDrops() || pickaxe.isCorrectToolForDrops(targetState)
+				? Block.getDrops(targetState, level, target, targetBlockEntity, null, pickaxe)
+				: List.of();
 
 		// Vanlig knusing, men uten at blokken dropper noe selv (false). Dette viser partikler og lyd,
 		// og innholdet i kister o.l. blir liggende på bakken der blokken stod, akkurat som i vanilla.
 		// Ingen XP, siden det bare gis når en spiller knuser blokken.
 		level.destroyBlock(target, false);
+
+		damagePickaxe(level, pickaxe, hardness);
 
 		// Det som ikke får plass i lageret, spyttes ut midt på toppen av quarrien, uten fart.
 		double x = this.worldPosition.getX() + 0.5;
@@ -280,6 +334,26 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 			item.setDefaultPickUpDelay();
 			level.addFreshEntity(item);
 		}
+	}
+
+	/**
+	 * Slitasje som når en spiller miner (Item.mineBlock): damagePerBlock fra Tool-komponenten,
+	 * men ingenting for blokker med hardhet 0. hurtAndBreak med ServerLevel tar hensyn til Unbreaking
+	 * uten spiller. Går pickaxen i stykker, blir slotten tom og quarrien stopper.
+	 */
+	private void damagePickaxe(ServerLevel level, ItemStack pickaxe, float hardness) {
+		Tool tool = pickaxe.get(DataComponents.TOOL);
+		if (tool == null || hardness == 0.0F || tool.damagePerBlock() <= 0) {
+			return;
+		}
+		pickaxe.hurtAndBreak(tool.damagePerBlock(), level, null, brokenItem ->
+				level.playSound(null, this.worldPosition, SoundEvents.ITEM_BREAK.value(), SoundSource.BLOCKS, 0.8F,
+						0.8F + level.getRandom().nextFloat() * 0.4F));
+		// Stacken endres direkte i slotten; si fra slik at den lagres (menyen ser endringen selv).
+		if (pickaxe.isEmpty()) {
+			items.set(PICKAXE_SLOT, ItemStack.EMPTY);
+		}
+		setChanged();
 	}
 
 	/**
@@ -383,16 +457,30 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 
 	// --- Hoppere (WorldlyContainer) ---
 
-	// Bare undersiden gir tilgang, og bare til lageret.
+	// Undersiden: lageret (bare uttak). Baksiden: pickaxe-slotten (bare innsetting). Andre sider: ingenting.
 	@Override
 	public int[] getSlotsForFace(Direction side) {
-		return side == Direction.DOWN ? STORAGE_SLOTS : NO_SLOTS;
+		if (side == Direction.DOWN) {
+			return STORAGE_SLOTS;
+		}
+		if (side == getBackSide()) {
+			return PICKAXE_SLOTS;
+		}
+		return NO_SLOTS;
 	}
 
-	// Ingenting kan settes inn fra noen side (pickaxe/fuel via hopper kommer senere).
+	// Bare en pickaxe gjennom baksiden, og bare når pickaxe-slotten er tom (maks 1).
 	@Override
 	public boolean canPlaceItemThroughFace(int slot, ItemStack stack, Direction side) {
-		return false;
+		return side == getBackSide()
+				&& slot == PICKAXE_SLOT
+				&& isPickaxe(stack)
+				&& items.get(PICKAXE_SLOT).isEmpty();
+	}
+
+	/** Baksiden er motsatt av fronten (FACING). */
+	private Direction getBackSide() {
+		return getBlockState().getValue(HorizontalDirectionalBlock.FACING).getOpposite();
 	}
 
 	// Det som står under (hopper o.l.) kan trekke fra lageret, aldri fra pickaxe/fuel.
@@ -410,7 +498,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		output.putInt("Column", column);
 		output.putInt("Row", row);
 		output.putInt("Layer", layer);
-		output.putInt("Progress", progress);
+		output.putFloat("MiningProgress", progress);
 		output.putBoolean("Finished", finished);
 		ContainerHelper.saveAllItems(output, items);
 		ContainerHelper.saveAllItems(output.child("Filter"), filter.getItems());
@@ -424,7 +512,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		column = input.getIntOr("Column", 0);
 		row = input.getIntOr("Row", 0);
 		layer = input.getIntOr("Layer", 0);
-		progress = input.getIntOr("Progress", 0);
+		// Ny nøkkel (andel 0–1). Gamle lagringer med "Progress" i ticks starter blokken på nytt.
+		progress = input.getFloatOr("MiningProgress", 0.0F);
 		finished = input.getBooleanOr("Finished", false);
 		items = NonNullList.withSize(CONTAINER_SIZE, ItemStack.EMPTY);
 		ContainerHelper.loadAllItems(input, items);
