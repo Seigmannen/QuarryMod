@@ -1,4 +1,11 @@
 {
   "block.quarrymod.quarry": "Quarry",
-  "block.quarrymod.quarry.tooltip": "15x15 Mining Area"
+  "block.quarrymod.quarry.tooltip": "15x15 Mining Area",
+  "container.quarrymod.quarry": "Quarry",
+  "gui.quarrymod.filter.disabled": "Filter: Disabled",
+  "gui.quarrymod.filter.whitelist": "Filter: Whitelist",
+  "gui.quarrymod.filter.blacklist": "Filter: Blacklist",
+  "gui.quarrymod.status.empty": "Empty",
+  "gui.quarrymod.status.ready": "Ready",
+  "gui.quarrymod.status.running": "Running"
 }

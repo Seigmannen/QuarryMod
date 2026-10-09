@@ -4,6 +4,10 @@ import com.seigmannen.quarrymod.block.entity.ModBlockEntities;
 import com.seigmannen.quarrymod.block.entity.QuarryBlockEntity;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.Containers;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
@@ -17,6 +21,7 @@ import net.minecraft.world.level.block.state.StateDefinition;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.BooleanProperty;
 import net.minecraft.world.level.redstone.Orientation;
+import net.minecraft.world.phys.BlockHitResult;
 
 /**
  * Selve quarry-blokken. Fronten vender mot spilleren som plasserte den,
@@ -85,6 +90,23 @@ public class QuarryBlock extends HorizontalDirectionalBlock implements EntityBlo
 			// UPDATE_CLIENTS: send den nye staten til spillerne, uten å varsle naboene unødvendig.
 			level.setBlock(pos, state.setValue(POWERED, powered), Block.UPDATE_CLIENTS);
 		}
+	}
+
+	// Høyreklikk åpner GUI-en. Holder spilleren et item, kalles denne også (useItemOn sender videre hit),
+	// bortsett fra når spilleren sniker med et item i hånden – da plasseres blokken som vanlig.
+	@Override
+	protected InteractionResult useWithoutItem(BlockState state, Level level, BlockPos pos, Player player, BlockHitResult hitResult) {
+		if (!level.isClientSide() && level.getBlockEntity(pos) instanceof QuarryBlockEntity quarry) {
+			player.openMenu(quarry);
+		}
+		return InteractionResult.SUCCESS;
+	}
+
+	// Innholdet droppes automatisk av block entityen (BaseContainerBlockEntity) når blokken brytes.
+	// Her oppdaterer vi bare naboene etterpå, slik ovnen gjør.
+	@Override
+	protected void affectNeighborsAfterRemoval(BlockState state, ServerLevel level, BlockPos pos, boolean movedByPiston) {
+		Containers.updateNeighboursAfterDestroy(state, level, pos);
 	}
 
 	// Lager en ny block entity når blokken settes ut. Et nytt objekt starter alltid på A1.

@@ -1,4 +1,11 @@
 {
   "block.quarrymod.quarry": "Steinbrudd",
-  "block.quarrymod.quarry.tooltip": "Graveområde 15x15"
+  "block.quarrymod.quarry.tooltip": "Graveområde 15x15",
+  "container.quarrymod.quarry": "Steinbrudd",
+  "gui.quarrymod.filter.disabled": "Filter: Av",
+  "gui.quarrymod.filter.whitelist": "Filter: Hviteliste",
+  "gui.quarrymod.filter.blacklist": "Filter: Svarteliste",
+  "gui.quarrymod.status.empty": "Tom",
+  "gui.quarrymod.status.ready": "Klar",
+  "gui.quarrymod.status.running": "Kjører"
 }

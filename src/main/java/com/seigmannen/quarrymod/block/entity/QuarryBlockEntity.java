@@ -1,18 +1,32 @@
 package com.seigmannen.quarrymod.block.entity;
 
 import com.seigmannen.quarrymod.block.QuarryBlock;
+import com.seigmannen.quarrymod.menu.QuarryMenu;
 import java.util.List;
+import java.util.stream.IntStream;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.NonNullList;
+import net.minecraft.core.component.DataComponents;
+import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.tags.ItemTags;
+import net.minecraft.world.ContainerHelper;
+import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.WorldlyContainer;
 import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ContainerData;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.HopperBlock;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
 import net.minecraft.world.level.block.LiquidBlock;
+import net.minecraft.world.level.block.entity.BaseContainerBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
@@ -24,8 +38,13 @@ import net.minecraft.world.level.storage.ValueOutput;
  * Området er et 15x15 "sjakkbrett" med quarrien over H8:
  * - Kolonner A–O (lagres som 0–14). A er lengst til venstre sett fra en spiller som ser på fronten.
  * - Rader 1–15 (lagres som 0–14). Rad 1 er lengst bak (motsatt side av fronten).
+ *
+ * Inventory: slot 0 = pickaxe, slot 1 = fuel, slot 2–25 = lager.
+ * BaseContainerBlockEntity gjør at innholdet droppes automatisk når blokken brytes.
+ * WorldlyContainer styrer hva hoppere får ta ut / sette inn fra hver side.
+ * Filteret er en egen liste med kopier og er IKKE en del av inventoryet (så det droppes ikke).
  */
-public class QuarryBlockEntity extends BlockEntity {
+public class QuarryBlockEntity extends BaseContainerBlockEntity implements WorldlyContainer {
 	/** Hvor mange ticks det tar å mine én blokk (6 = diamantpickaxe på stein). Endre her for å justere farten. */
 	public static final int TICKS_PER_BLOCK = 6;
 
@@ -38,6 +57,70 @@ public class QuarryBlockEntity extends BlockEntity {
 
 	/** Verktøyet dropsene regnes ut med: en vanlig diamantpickaxe uten enchantments. */
 	private static final ItemStack MINING_TOOL = new ItemStack(Items.DIAMOND_PICKAXE);
+
+	// --- Inventory ---
+	public static final int PICKAXE_SLOT = 0;
+	public static final int FUEL_SLOT = 1;
+	public static final int STORAGE_START = 2;
+	public static final int STORAGE_SIZE = 24;
+	public static final int CONTAINER_SIZE = STORAGE_START + STORAGE_SIZE; // 26
+	public static final int FILTER_SIZE = 9;
+
+	/** Slotsene en hopper under quarrien kan trekke fra (bare lageret). */
+	private static final int[] STORAGE_SLOTS = IntStream.range(STORAGE_START, CONTAINER_SIZE).toArray();
+	private static final int[] NO_SLOTS = new int[0];
+
+	// --- Status (synkroniseres til GUI-en via ContainerData) ---
+	public static final int STATUS_EMPTY = 0;    // ingen fuel
+	public static final int STATUS_READY = 1;    // fuel, men ingen pickaxe
+	public static final int STATUS_RUNNING = 2;  // fuel og pickaxe
+
+	// --- Filtermodus ---
+	public static final int FILTER_DISABLED = 0;
+	public static final int FILTER_WHITELIST = 1;
+	public static final int FILTER_BLACKLIST = 2;
+	public static final int FILTER_MODE_COUNT = 3;
+
+	/** Indeksene i ContainerData. */
+	public static final int DATA_STATUS = 0;
+	public static final int DATA_FILTER_MODE = 1;
+	public static final int DATA_COUNT = 2;
+
+	private NonNullList<ItemStack> items = NonNullList.withSize(CONTAINER_SIZE, ItemStack.EMPTY);
+
+	/** Filter-kopiene (antall 1). Når de endres, markeres block entityen som endret slik at de lagres. */
+	private final SimpleContainer filter = new SimpleContainer(FILTER_SIZE) {
+		@Override
+		public void setChanged() {
+			super.setChanged();
+			QuarryBlockEntity.this.setChanged();
+		}
+	};
+	private int filterMode = FILTER_DISABLED;
+
+	/** Tallene GUI-en trenger. Menyen sender dem automatisk til klienten når de endres. */
+	private final ContainerData data = new ContainerData() {
+		@Override
+		public int get(int index) {
+			return switch (index) {
+				case DATA_STATUS -> getStatus();
+				case DATA_FILTER_MODE -> filterMode;
+				default -> 0;
+			};
+		}
+
+		@Override
+		public void set(int index, int value) {
+			if (index == DATA_FILTER_MODE) {
+				filterMode = value;
+			}
+		}
+
+		@Override
+		public int getCount() {
+			return DATA_COUNT;
+		}
+	};
 
 	// --- Data som lagres ---
 	private int column = 0;    // 0 = A, 14 = O
@@ -87,7 +170,7 @@ public class QuarryBlockEntity extends BlockEntity {
 			}
 
 			BlockState targetState = level.getBlockState(target);
-			if (shouldSkip(targetState, level, target)) {
+			if (quarry.shouldSkip(targetState, level, target)) {
 				// Hopp over gratis (koster ingen tid) og gå videre til neste posisjon.
 				quarry.advance();
 				skipped++;
@@ -153,7 +236,11 @@ public class QuarryBlockEntity extends BlockEntity {
 	}
 
 	/** Blokker som quarrien ikke skal mine. */
-	private static boolean shouldSkip(BlockState state, Level level, BlockPos pos) {
+	private boolean shouldSkip(BlockState state, Level level, BlockPos pos) {
+		// En hopper rett under quarrien (H8 på første lag) får stå, så den kan tømme lageret.
+		if (pos.equals(this.worldPosition.below()) && state.getBlock() instanceof HopperBlock) {
+			return true;
+		}
 		// Luft.
 		if (state.isAir()) {
 			return true;
@@ -167,7 +254,7 @@ public class QuarryBlockEntity extends BlockEntity {
 		return state.getDestroySpeed(level, pos) < 0;
 	}
 
-	/** Knuser blokken og sender blokk-dropsene til toppen av quarrien. */
+	/** Knuser blokken. Dropsene går inn i lageret, og det som ikke får plass, spyttes ut på toppen. */
 	private void mineBlock(ServerLevel level, BlockPos target, BlockState targetState) {
 		// Hent block entity (f.eks. for kister) FØR blokken fjernes, siden noen loot tables trenger den.
 		BlockEntity targetBlockEntity = level.getBlockEntity(target);
@@ -180,18 +267,138 @@ public class QuarryBlockEntity extends BlockEntity {
 		// Ingen XP, siden det bare gis når en spiller knuser blokken.
 		level.destroyBlock(target, false);
 
-		// Spytt ut dropsene midt på toppen av quarrien, uten fart.
+		// Det som ikke får plass i lageret, spyttes ut midt på toppen av quarrien, uten fart.
 		double x = this.worldPosition.getX() + 0.5;
 		double y = this.worldPosition.getY() + 1.0;
 		double z = this.worldPosition.getZ() + 0.5;
 		for (ItemStack drop : drops) {
-			if (drop.isEmpty()) {
+			ItemStack rest = insertIntoStorage(drop);
+			if (rest.isEmpty()) {
 				continue;
 			}
-			ItemEntity item = new ItemEntity(level, x, y, z, drop, 0.0, 0.0, 0.0);
+			ItemEntity item = new ItemEntity(level, x, y, z, rest, 0.0, 0.0, 0.0);
 			item.setDefaultPickUpDelay();
 			level.addFreshEntity(item);
 		}
+	}
+
+	/**
+	 * Legger stacken i lageret (slot 2–25): først oppå like stacks, så i tomme slots.
+	 * Returnerer det som ikke fikk plass (tom stack hvis alt kom inn).
+	 */
+	private ItemStack insertIntoStorage(ItemStack stack) {
+		ItemStack rest = stack.copy();
+		// Runde 1: fyll opp eksisterende stacks av samme item.
+		for (int i = STORAGE_START; i < CONTAINER_SIZE && !rest.isEmpty(); i++) {
+			ItemStack existing = items.get(i);
+			if (!existing.isEmpty() && ItemStack.isSameItemSameComponents(existing, rest)) {
+				int move = Math.min(rest.getCount(), existing.getMaxStackSize() - existing.getCount());
+				if (move > 0) {
+					existing.grow(move);
+					rest.shrink(move);
+				}
+			}
+		}
+		// Runde 2: tomme slots.
+		for (int i = STORAGE_START; i < CONTAINER_SIZE && !rest.isEmpty(); i++) {
+			if (items.get(i).isEmpty()) {
+				items.set(i, rest.split(rest.getMaxStackSize()));
+			}
+		}
+		return rest;
+	}
+
+	// --- Status og filter ---
+
+	/** Status som vises i GUI-en. Foreløpig miner quarrien uansett status. */
+	public int getStatus() {
+		if (items.get(FUEL_SLOT).isEmpty()) {
+			return STATUS_EMPTY;
+		}
+		if (items.get(PICKAXE_SLOT).isEmpty()) {
+			return STATUS_READY;
+		}
+		return STATUS_RUNNING;
+	}
+
+	/** Disabled -> Whitelist -> Blacklist -> Disabled ... */
+	public void cycleFilterMode() {
+		filterMode = (filterMode + 1) % FILTER_MODE_COUNT;
+		setChanged();
+	}
+
+	public SimpleContainer getFilter() {
+		return filter;
+	}
+
+	public ContainerData getData() {
+		return data;
+	}
+
+	public static boolean isPickaxe(ItemStack stack) {
+		return stack.is(ItemTags.PICKAXES);
+	}
+
+	/** Samme sjekk som ovnen bruker: items med COOKING_FUEL-komponenten kan brennes. */
+	public static boolean isFuel(ItemStack stack) {
+		return stack.has(DataComponents.COOKING_FUEL);
+	}
+
+	// --- Container / meny ---
+
+	@Override
+	protected Component getDefaultName() {
+		return Component.translatable("container.quarrymod.quarry");
+	}
+
+	@Override
+	protected NonNullList<ItemStack> getItems() {
+		return items;
+	}
+
+	@Override
+	protected void setItems(NonNullList<ItemStack> items) {
+		this.items = items;
+	}
+
+	@Override
+	public int getContainerSize() {
+		return CONTAINER_SIZE;
+	}
+
+	@Override
+	protected AbstractContainerMenu createMenu(int containerId, Inventory inventory) {
+		return new QuarryMenu(containerId, inventory, this);
+	}
+
+	// Hva som lovlig kan ligge i hver slot. Lageret fylles bare av quarrien selv.
+	@Override
+	public boolean canPlaceItem(int slot, ItemStack stack) {
+		return switch (slot) {
+			case PICKAXE_SLOT -> isPickaxe(stack);
+			case FUEL_SLOT -> isFuel(stack);
+			default -> false;
+		};
+	}
+
+	// --- Hoppere (WorldlyContainer) ---
+
+	// Bare undersiden gir tilgang, og bare til lageret.
+	@Override
+	public int[] getSlotsForFace(Direction side) {
+		return side == Direction.DOWN ? STORAGE_SLOTS : NO_SLOTS;
+	}
+
+	// Ingenting kan settes inn fra noen side (pickaxe/fuel via hopper kommer senere).
+	@Override
+	public boolean canPlaceItemThroughFace(int slot, ItemStack stack, Direction side) {
+		return false;
+	}
+
+	// Det som står under (hopper o.l.) kan trekke fra lageret, aldri fra pickaxe/fuel.
+	@Override
+	public boolean canTakeItemThroughFace(int slot, ItemStack stack, Direction side) {
+		return side == Direction.DOWN && slot >= STORAGE_START && slot < CONTAINER_SIZE;
 	}
 
 	// --- Lagring ---
@@ -205,6 +412,9 @@ public class QuarryBlockEntity extends BlockEntity {
 		output.putInt("Layer", layer);
 		output.putInt("Progress", progress);
 		output.putBoolean("Finished", finished);
+		ContainerHelper.saveAllItems(output, items);
+		ContainerHelper.saveAllItems(output.child("Filter"), filter.getItems());
+		output.putInt("FilterMode", filterMode);
 	}
 
 	// Leser dataene tilbake når chunken lastes inn igjen.
@@ -216,5 +426,10 @@ public class QuarryBlockEntity extends BlockEntity {
 		layer = input.getIntOr("Layer", 0);
 		progress = input.getIntOr("Progress", 0);
 		finished = input.getBooleanOr("Finished", false);
+		items = NonNullList.withSize(CONTAINER_SIZE, ItemStack.EMPTY);
+		ContainerHelper.loadAllItems(input, items);
+		filter.getItems().replaceAll(stack -> ItemStack.EMPTY);
+		ContainerHelper.loadAllItems(input.childOrEmpty("Filter"), filter.getItems());
+		filterMode = Math.floorMod(input.getIntOr("FilterMode", FILTER_DISABLED), FILTER_MODE_COUNT);
 	}
 }
