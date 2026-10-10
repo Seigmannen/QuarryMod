@@ -9,14 +9,14 @@ A simple quarry for Minecraft 26.3 (Fabric), inspired by Simple Quarries Plus.
 
 - Mines a 15x15 area centered on the quarry, layer by layer, starting from the layer below it and going down to the bottom of the world
 - Mines in a fixed grid order starting at the back-left corner (relative to the front of the quarry)
-- Mines one block every 6 ticks (diamond pickaxe speed on stone)
+- Mining speed depends on the inserted pickaxe (10x slower than a player mining stone, e.g. about 3 seconds per block with a diamond pickaxe). All blocks take the same time.
 - Skips air, liquids and unbreakable blocks
-- Drops as if mined with a diamond pickaxe (e.g. diamond ore gives diamonds)
-- Outputs items on top of the quarry, which works well with water collection systems
+- Mined items go into internal storage; when storage is full, items are ejected on top (works well with water collection systems)
 - Container contents (e.g. chests) drop on the ground like in vanilla
 - Remembers its progress when the chunk unloads or the world is reloaded
 - Redstone control: a redstone signal pauses it
 - Status light on the front: green = running, red = paused, off = finished
+- Needs both a pickaxe and fuel to work
 - Uses the pickaxe you insert: tool speed, Efficiency, Silk Touch, Fortune and Unbreaking work like vanilla, and the pickaxe takes durability damage
 - Runs on furnace fuel: one smelt in a furnace = 12 blocks (coal = 96, lava bucket = 1200); empty buckets go to storage
 - 24-slot internal storage; overflow is ejected on top
