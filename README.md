@@ -17,6 +17,10 @@ A simple quarry for Minecraft 26.3 (Fabric), inspired by Simple Quarries Plus.
 - Remembers its progress when the chunk unloads or the world is reloaded
 - Redstone control: a redstone signal pauses it
 - Status light on the front: green = running, red = paused, off = finished
+- Uses the pickaxe you insert: tool speed, Efficiency, Silk Touch, Fortune and Unbreaking work like vanilla, and the pickaxe takes durability damage
+- Runs on furnace fuel: one smelt in a furnace = 12 blocks (coal = 96, lava bucket = 1200); empty buckets go to storage
+- 24-slot internal storage; overflow is ejected on top
+- Hopper support: pickaxes from the back, fuel from the sides, storage can be pulled from below
 
 ## Crafting
 
@@ -33,9 +37,9 @@ R I R
 
 ## Planned features
 
-- [ ] Fuel
-- [ ] Use regular pickaxes in the quarry: the pickaxe type and its enchantments affect mining (e.g. Silk Touch mines with silk touch, Fortune gives fortune drops, Efficiency mines faster)
-- [ ] Inventory
+- [x] Fuel
+- [x] Use regular pickaxes in the quarry: the pickaxe type and its enchantments affect mining (e.g. Silk Touch mines with silk touch, Fortune gives fortune drops, Efficiency mines faster)
+- [x] Inventory
 - [ ] Item filter with three modes: whitelist / blacklist / disabled
 - [ ] Upgrades:
   - [ ] Speed upgrades (mine faster)

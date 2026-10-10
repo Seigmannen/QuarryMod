@@ -90,6 +90,13 @@ public class QuarryMenu extends AbstractContainerMenu {
 		return data.get(QuarryBlockEntity.DATA_STATUS);
 	}
 
+	/** Setter sammen de to 16-bit-halvdelene. Masken trengs fordi klienten leser dem som (signed) short. */
+	public int getRemainingBlocks() {
+		int low = data.get(QuarryBlockEntity.DATA_BLOCKS_LOW) & 0xFFFF;
+		int high = data.get(QuarryBlockEntity.DATA_BLOCKS_HIGH) & 0xFFFF;
+		return (high << 16) | low;
+	}
+
 	public int getFilterMode() {
 		return data.get(QuarryBlockEntity.DATA_FILTER_MODE);
 	}

@@ -7,5 +7,5 @@
   "gui.quarrymod.filter.blacklist": "Filter: Svarteliste",
   "gui.quarrymod.status.empty": "Tom",
   "gui.quarrymod.status.ready": "Klar",
-  "gui.quarrymod.status.running": "Kjører"
+  "gui.quarrymod.status.blocks": "blokker"
 }

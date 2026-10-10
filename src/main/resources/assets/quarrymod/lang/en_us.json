@@ -7,5 +7,5 @@
   "gui.quarrymod.filter.blacklist": "Filter: Blacklist",
   "gui.quarrymod.status.empty": "Empty",
   "gui.quarrymod.status.ready": "Ready",
-  "gui.quarrymod.status.running": "Running"
+  "gui.quarrymod.status.blocks": "blocks"
 }

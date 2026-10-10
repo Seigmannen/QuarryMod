@@ -24,6 +24,10 @@ public class QuarryScreen extends AbstractContainerScreen<QuarryMenu> {
 	private static final int LABEL_COLOR = 0xFF404040; // samme grå som vanilla-titler
 	// Slot-grå (0x8B8B8B) med ca. 60 % dekkevne (0x99 = 153/255).
 	private static final int GHOST_OVERLAY_COLOR = 0x998B8B8B;
+	// Status-teksten: sentrert om midten av fuel-slotten (x = 17 + 8), over skillelinjen på y = 94.
+	private static final int STATUS_CENTER_X = 25;
+	private static final int STATUS_LINE_1_Y = 76;
+	private static final int STATUS_LINE_2_Y = 86;
 	private static final ItemStack PICKAXE_ICON = new ItemStack(Items.IRON_PICKAXE);
 	private static final ItemStack FUEL_ICON = new ItemStack(Items.COAL);
 
@@ -61,12 +65,25 @@ public class QuarryScreen extends AbstractContainerScreen<QuarryMenu> {
 		};
 	}
 
-	private Component statusText() {
-		return switch (this.menu.getStatus()) {
-			case QuarryBlockEntity.STATUS_READY -> Component.translatable("gui.quarrymod.status.ready").withStyle(ChatFormatting.YELLOW);
-			case QuarryBlockEntity.STATUS_RUNNING -> Component.translatable("gui.quarrymod.status.running").withStyle(ChatFormatting.GREEN);
-			default -> Component.translatable("gui.quarrymod.status.empty").withStyle(ChatFormatting.RED);
-		};
+	/** Status under fuel-slotten: "Ready"/"Empty" på én linje, eller antallet og "blocks" på to linjer. */
+	private void drawStatus(GuiGraphicsExtractor graphics) {
+		switch (this.menu.getStatus()) {
+			case QuarryBlockEntity.STATUS_READY ->
+					drawStatusLine(graphics, Component.translatable("gui.quarrymod.status.ready").withStyle(ChatFormatting.YELLOW), STATUS_LINE_1_Y);
+			case QuarryBlockEntity.STATUS_RUNNING -> {
+				// Blokkene den innlastede fuelen rekker. Oppdateres hver gang serveren sender nytt tall.
+				drawStatusLine(graphics, Component.literal(Integer.toString(this.menu.getRemainingBlocks())).withStyle(ChatFormatting.GREEN), STATUS_LINE_1_Y);
+				drawStatusLine(graphics, Component.translatable("gui.quarrymod.status.blocks").withStyle(ChatFormatting.GREEN), STATUS_LINE_2_Y);
+			}
+			default ->
+					drawStatusLine(graphics, Component.translatable("gui.quarrymod.status.empty").withStyle(ChatFormatting.RED), STATUS_LINE_1_Y);
+		}
+	}
+
+	/** Sentrert under fuel-slotten. Med skygge, så gult/grønt er lett å lese på den grå bakgrunnen. */
+	private void drawStatusLine(GuiGraphicsExtractor graphics, Component text, int y) {
+		int x = STATUS_CENTER_X - this.font.width(text) / 2;
+		graphics.text(this.font, text, x, y, 0xFFFFFFFF, true);
 	}
 
 	// Bakgrunnsteksturen: 176x248 øverst til venstre i en 256x256-fil.
@@ -106,7 +123,6 @@ public class QuarryScreen extends AbstractContainerScreen<QuarryMenu> {
 	@Override
 	protected void extractLabels(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		graphics.text(this.font, this.title, this.titleLabelX, this.titleLabelY, LABEL_COLOR, false);
-		// Med skygge, så gult/grønt er lett å lese på den grå bakgrunnen.
-		graphics.text(this.font, statusText(), 8, 76, 0xFFFFFFFF, true);
+		drawStatus(graphics);
 	}
 }

@@ -23,6 +23,8 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ContainerData;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.ItemStackTemplate;
+import net.minecraft.world.item.component.CookingFuel;
 import net.minecraft.world.item.component.Tool;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.Enchantments;
@@ -35,6 +37,7 @@ import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.entity.BaseContainerBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.storage.loot.providers.number.ints.ResolvableInt;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 
@@ -71,6 +74,12 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	/** Maks antall posisjoner som kan hoppes over i én tick (ett helt lag), for å unngå lag. */
 	private static final int MAX_SKIPS_PER_TICK = SIZE * SIZE;
 
+	// --- Fuel ---
+	/** Én smelting i en ovn (200 ticks brenntid) = 12 blokker, så hver tick brenntid gir 12 poeng. */
+	private static final int POINTS_PER_BURN_TICK = 12;
+	/** Hver minet blokk koster 200 poeng. Kull: 1600 * 12 / 200 = 96 blokker. */
+	public static final int POINTS_PER_BLOCK = 200;
+
 	// --- Inventory ---
 	public static final int PICKAXE_SLOT = 0;
 	public static final int FUEL_SLOT = 1;
@@ -83,6 +92,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	private static final int[] STORAGE_SLOTS = IntStream.range(STORAGE_START, CONTAINER_SIZE).toArray();
 	/** Slotten en hopper på baksiden kan sette inn i. */
 	private static final int[] PICKAXE_SLOTS = {PICKAXE_SLOT};
+	/** Slotten en hopper på venstre/høyre side kan sette inn i. */
+	private static final int[] FUEL_SLOTS = {FUEL_SLOT};
 	private static final int[] NO_SLOTS = new int[0];
 
 	// --- Status (synkroniseres til GUI-en via ContainerData) ---
@@ -99,7 +110,10 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	/** Indeksene i ContainerData. */
 	public static final int DATA_STATUS = 0;
 	public static final int DATA_FILTER_MODE = 1;
-	public static final int DATA_COUNT = 2;
+	// Antall blokker fuelen rekker. ContainerData sendes som 16-bit (short), så tallet deles i to halvdeler.
+	public static final int DATA_BLOCKS_LOW = 2;
+	public static final int DATA_BLOCKS_HIGH = 3;
+	public static final int DATA_COUNT = 4;
 
 	private NonNullList<ItemStack> items = NonNullList.withSize(CONTAINER_SIZE, ItemStack.EMPTY);
 
@@ -120,6 +134,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 			return switch (index) {
 				case DATA_STATUS -> getStatus();
 				case DATA_FILTER_MODE -> filterMode;
+				case DATA_BLOCKS_LOW -> getRemainingBlocks() & 0xFFFF;
+				case DATA_BLOCKS_HIGH -> getRemainingBlocks() >>> 16;
 				default -> 0;
 			};
 		}
@@ -145,6 +161,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	// fremdriften beholdes hvis pickaxen byttes, mens den nye farten gjelder for resten.
 	private float progress = 0.0F;
 	private boolean finished = false;
+	// Internt fuel-lager i poeng (heltall, så vi slipper avrunding). Long i tilfelle mod-fuel med enorm brenntid.
+	private long fuelStored = 0;
 
 	public QuarryBlockEntity(BlockPos pos, BlockState state) {
 		super(ModBlockEntities.QUARRY, pos, state);
@@ -163,13 +181,16 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 			markFinished(level, pos, state);
 			return;
 		}
-		// Redstone-signal = pause. Vi gjør ingenting, så posisjon og fremdrift beholdes som de er.
-		if (state.getValue(QuarryBlock.POWERED)) {
-			return;
-		}
 		// Uten pickaxe står quarrien stille, men beholder posisjon og fremdrift.
 		ItemStack pickaxe = quarry.items.get(PICKAXE_SLOT);
 		if (pickaxe.isEmpty()) {
+			return;
+		}
+		// Last inn ett fuel-item med en gang det er pickaxe (også under pause), så GUI-en viser antall blokker
+		// i stedet for "Empty". Poengene brukes først når en blokk faktisk mines.
+		quarry.ensureFuel(serverLevel);
+		// Redstone-signal = pause. Vi gjør ingenting mer, så posisjon og fremdrift beholdes som de er.
+		if (state.getValue(QuarryBlock.POWERED)) {
 			return;
 		}
 
@@ -199,10 +220,16 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 				continue;
 			}
 
-			// En blokk som skal mines: legg til én tick med pickaxens fart.
+			// En blokk som skal mines: sørg for fuel til hele blokken. Ellers står vi stille med fremdriften intakt.
+			if (!quarry.ensureFuel(serverLevel)) {
+				break;
+			}
+
+			// Legg til én tick med pickaxens fart.
 			quarry.progress += 1.0F / ticksPerBlock(serverLevel, pickaxe);
 			if (quarry.progress >= PROGRESS_DONE) {
 				quarry.mineBlock(serverLevel, target, targetState, pickaxe);
+				quarry.fuelStored -= POINTS_PER_BLOCK;
 				quarry.advance();
 			}
 			break;
@@ -234,6 +261,54 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 
 		int ticks = Mth.ceil(30.0F * REFERENCE_HARDNESS * SPEED_FACTOR / miningSpeed);
 		return Math.max(1, ticks);
+	}
+
+	/**
+	 * Har lageret under 200 poeng, brennes ett item fra fuel-slotten. Returnerer om det nå er nok til én blokk.
+	 * Siden de 200 poengene først trekkes når blokken er ferdig, skjer påfyllet i praksis før en ny blokk.
+	 */
+	private boolean ensureFuel(ServerLevel level) {
+		if (fuelStored >= POINTS_PER_BLOCK) {
+			return true;
+		}
+		ItemStack fuel = items.get(FUEL_SLOT);
+		int burnTime = getBurnTime(level, fuel);
+		if (burnTime <= 0) {
+			return false;
+		}
+		fuelStored += (long) burnTime * POINTS_PER_BURN_TICK;
+
+		// Som i ovnen: hent resten (f.eks. bøtta etter lava) før stacken krympes.
+		ItemStackTemplate remainder = fuel.getItem().getCraftingRemainder();
+		fuel.shrink(1);
+		if (fuel.isEmpty()) {
+			items.set(FUEL_SLOT, ItemStack.EMPTY);
+		}
+		// Resten går i lageret, eller ut på toppen hvis det er fullt.
+		if (remainder != null) {
+			storeOrSpit(level, remainder.create());
+		}
+		setChanged();
+		return fuelStored >= POINTS_PER_BLOCK;
+	}
+
+	/**
+	 * Brenntiden i ticks, regnet ut på samme måte som ovnen: fra COOKING_FUEL-komponenten.
+	 * Den er data-drevet, så fuel fra andre mods virker også. 0 hvis itemet ikke er fuel.
+	 */
+	private int getBurnTime(ServerLevel level, ItemStack stack) {
+		if (stack.isEmpty()) {
+			return 0;
+		}
+		return ResolvableInt.getFromItem(stack, DataComponents.COOKING_FUEL, CookingFuel::burnTime, getLootContext(level), 0);
+	}
+
+	/**
+	 * Hvor mange blokker den innlastede fuelen rekker: fuel-lageret / 200, rundet ned.
+	 * Items som fortsatt ligger i fuel-slotten telles ikke med.
+	 */
+	public int getRemainingBlocks() {
+		return (int) Math.min(fuelStored / POINTS_PER_BLOCK, Integer.MAX_VALUE);
 	}
 
 	/** Setter FINISHED=true på blokken, slik at fronten bytter til "ferdig"-teksturen. */
@@ -321,19 +396,23 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 
 		damagePickaxe(level, pickaxe, hardness);
 
-		// Det som ikke får plass i lageret, spyttes ut midt på toppen av quarrien, uten fart.
+		for (ItemStack drop : drops) {
+			storeOrSpit(level, drop);
+		}
+	}
+
+	/** Legger stacken i lageret. Det som ikke får plass, spyttes ut midt på toppen av quarrien, uten fart. */
+	private void storeOrSpit(ServerLevel level, ItemStack stack) {
+		ItemStack rest = insertIntoStorage(stack);
+		if (rest.isEmpty()) {
+			return;
+		}
 		double x = this.worldPosition.getX() + 0.5;
 		double y = this.worldPosition.getY() + 1.0;
 		double z = this.worldPosition.getZ() + 0.5;
-		for (ItemStack drop : drops) {
-			ItemStack rest = insertIntoStorage(drop);
-			if (rest.isEmpty()) {
-				continue;
-			}
-			ItemEntity item = new ItemEntity(level, x, y, z, rest, 0.0, 0.0, 0.0);
-			item.setDefaultPickUpDelay();
-			level.addFreshEntity(item);
-		}
+		ItemEntity item = new ItemEntity(level, x, y, z, rest, 0.0, 0.0, 0.0);
+		item.setDefaultPickUpDelay();
+		level.addFreshEntity(item);
 	}
 
 	/**
@@ -384,15 +463,17 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 
 	// --- Status og filter ---
 
-	/** Status som vises i GUI-en. Foreløpig miner quarrien uansett status. */
+	/**
+	 * Status som vises i GUI-en.
+	 * Uten pickaxe: Ready hvis det finnes fuel (lastet eller i slotten), ellers Empty.
+	 * Med pickaxe: Running (antall blokker) hvis noe er lastet, ellers Empty.
+	 */
 	public int getStatus() {
-		if (items.get(FUEL_SLOT).isEmpty()) {
-			return STATUS_EMPTY;
-		}
+		boolean hasLoadedFuel = getRemainingBlocks() > 0;
 		if (items.get(PICKAXE_SLOT).isEmpty()) {
-			return STATUS_READY;
+			return hasLoadedFuel || !items.get(FUEL_SLOT).isEmpty() ? STATUS_READY : STATUS_EMPTY;
 		}
-		return STATUS_RUNNING;
+		return hasLoadedFuel ? STATUS_RUNNING : STATUS_EMPTY;
 	}
 
 	/** Disabled -> Whitelist -> Blacklist -> Disabled ... */
@@ -457,7 +538,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 
 	// --- Hoppere (WorldlyContainer) ---
 
-	// Undersiden: lageret (bare uttak). Baksiden: pickaxe-slotten (bare innsetting). Andre sider: ingenting.
+	// Undersiden: lageret (bare uttak). Baksiden: pickaxe-slotten (bare innsetting).
+	// Venstre/høyre: fuel-slotten (bare innsetting). Fronten og toppen: ingenting.
 	@Override
 	public int[] getSlotsForFace(Direction side) {
 		if (side == Direction.DOWN) {
@@ -466,21 +548,34 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		if (side == getBackSide()) {
 			return PICKAXE_SLOTS;
 		}
+		if (isSideFace(side)) {
+			return FUEL_SLOTS;
+		}
 		return NO_SLOTS;
 	}
 
-	// Bare en pickaxe gjennom baksiden, og bare når pickaxe-slotten er tom (maks 1).
 	@Override
 	public boolean canPlaceItemThroughFace(int slot, ItemStack stack, Direction side) {
-		return side == getBackSide()
-				&& slot == PICKAXE_SLOT
-				&& isPickaxe(stack)
-				&& items.get(PICKAXE_SLOT).isEmpty();
+		// Bare en pickaxe gjennom baksiden, og bare når pickaxe-slotten er tom (maks 1).
+		if (side == getBackSide()) {
+			return slot == PICKAXE_SLOT && isPickaxe(stack) && items.get(PICKAXE_SLOT).isEmpty();
+		}
+		// Bare gyldig fuel gjennom venstre/høyre side.
+		if (isSideFace(side)) {
+			return slot == FUEL_SLOT && isFuel(stack);
+		}
+		return false;
 	}
 
 	/** Baksiden er motsatt av fronten (FACING). */
 	private Direction getBackSide() {
 		return getBlockState().getValue(HorizontalDirectionalBlock.FACING).getOpposite();
+	}
+
+	/** Venstre eller høyre side sett fra FACING (de to horisontale sidene som verken er front eller bak). */
+	private boolean isSideFace(Direction side) {
+		Direction front = getBlockState().getValue(HorizontalDirectionalBlock.FACING);
+		return side == front.getClockWise() || side == front.getCounterClockWise();
 	}
 
 	// Det som står under (hopper o.l.) kan trekke fra lageret, aldri fra pickaxe/fuel.
@@ -500,6 +595,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		output.putInt("Layer", layer);
 		output.putFloat("MiningProgress", progress);
 		output.putBoolean("Finished", finished);
+		output.putLong("FuelStored", fuelStored);
 		ContainerHelper.saveAllItems(output, items);
 		ContainerHelper.saveAllItems(output.child("Filter"), filter.getItems());
 		output.putInt("FilterMode", filterMode);
@@ -515,6 +611,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		// Ny nøkkel (andel 0–1). Gamle lagringer med "Progress" i ticks starter blokken på nytt.
 		progress = input.getFloatOr("MiningProgress", 0.0F);
 		finished = input.getBooleanOr("Finished", false);
+		fuelStored = input.getLongOr("FuelStored", 0L);
 		items = NonNullList.withSize(CONTAINER_SIZE, ItemStack.EMPTY);
 		ContainerHelper.loadAllItems(input, items);
 		filter.getItems().replaceAll(stack -> ItemStack.EMPTY);
