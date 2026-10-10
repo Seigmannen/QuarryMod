@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "key": {
+    "U": "quarrymod:speed_upgrade_3",
+    "X": "minecraft:diamond"
+  },
+  "pattern": [
+    " X ",
+    "XUX",
+    " X "
+  ],
+  "result": {
+    "id": "quarrymod:speed_upgrade_4"
+  }
+}

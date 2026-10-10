@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "key": {
+    "U": "quarrymod:area_upgrade_4",
+    "X": "minecraft:netherite_ingot"
+  },
+  "pattern": [
+    " X ",
+    "XUX",
+    " X "
+  ],
+  "result": {
+    "id": "quarrymod:area_upgrade_5"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "key": {
+    "U": "minecraft:redstone_block",
+    "X": "minecraft:iron_ingot"
+  },
+  "pattern": [
+    " X ",
+    "XUX",
+    " X "
+  ],
+  "result": {
+    "id": "quarrymod:speed_upgrade_1"
+  }
+}

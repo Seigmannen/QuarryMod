@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "redstone",
+  "key": {
+    "U": "minecraft:ender_pearl",
+    "X": "minecraft:iron_ingot"
+  },
+  "pattern": [
+    " X ",
+    "XUX",
+    " X "
+  ],
+  "result": {
+    "id": "quarrymod:area_upgrade_1"
+  }
+}
