@@ -101,6 +101,16 @@ public class QuarryMenu extends AbstractContainerMenu {
 		return data.get(QuarryBlockEntity.DATA_FILTER_MODE);
 	}
 
+	/** Om alle filter-slotsene er tomme. Virker på klienten også, siden slotsene synkroniseres. */
+	public boolean isFilterEmpty() {
+		for (int i = FILTER_START; i < FILTER_END; i++) {
+			if (this.slots.get(i).hasItem()) {
+				return false;
+			}
+		}
+		return true;
+	}
+
 	// Filterknappen: klienten sender knapp-ID-en, serveren bytter modus.
 	@Override
 	public boolean clickMenuButton(Player player, int id) {

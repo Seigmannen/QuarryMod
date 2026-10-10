@@ -5,6 +5,7 @@
   "gui.quarrymod.filter.disabled": "Filter: Disabled",
   "gui.quarrymod.filter.whitelist": "Filter: Whitelist",
   "gui.quarrymod.filter.blacklist": "Filter: Blacklist",
+  "gui.quarrymod.filter.whitelist_empty": "Whitelist empty",
   "gui.quarrymod.status.empty": "Empty",
   "gui.quarrymod.status.ready": "Ready",
   "gui.quarrymod.status.blocks": "blocks"

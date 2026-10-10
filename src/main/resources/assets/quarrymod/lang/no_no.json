@@ -5,6 +5,7 @@
   "gui.quarrymod.filter.disabled": "Filter: Av",
   "gui.quarrymod.filter.whitelist": "Filter: Hviteliste",
   "gui.quarrymod.filter.blacklist": "Filter: Svarteliste",
+  "gui.quarrymod.filter.whitelist_empty": "Hvitelisten er tom",
   "gui.quarrymod.status.empty": "Tom",
   "gui.quarrymod.status.ready": "Klar",
   "gui.quarrymod.status.blocks": "blokker"

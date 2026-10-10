@@ -106,6 +106,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	public static final int FILTER_WHITELIST = 1;
 	public static final int FILTER_BLACKLIST = 2;
 	public static final int FILTER_MODE_COUNT = 3;
+	/** false = drops som filtreres bort, slettes. true = de blir liggende der blokken ble minet. */
+	public static final boolean FILTERED_ITEMS_DROP_ON_GROUND = false;
 
 	/** Indeksene i ContainerData. */
 	public static final int DATA_STATUS = 0;
@@ -396,9 +398,31 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 
 		damagePickaxe(level, pickaxe, hardness);
 
+		// Filteret gjelder bare blokkens egne drops (etter Silk Touch/Fortune), ikke kisteinnhold eller fuel-rester.
 		for (ItemStack drop : drops) {
-			storeOrSpit(level, drop);
+			if (passesFilter(drop)) {
+				storeOrSpit(level, drop);
+			} else if (FILTERED_ITEMS_DROP_ON_GROUND) {
+				Block.popResource(level, target, drop);
+			}
+			// Ellers slettes dropen.
 		}
+	}
+
+	/** Om dropen skal beholdes etter filtermodusen. Bare item-typen sammenlignes (ikke antall/komponenter). */
+	private boolean passesFilter(ItemStack drop) {
+		if (filterMode == FILTER_DISABLED) {
+			return true;
+		}
+		boolean inFilter = false;
+		for (ItemStack entry : filter.getItems()) {
+			if (!entry.isEmpty() && ItemStack.isSameItem(entry, drop)) {
+				inFilter = true;
+				break;
+			}
+		}
+		// Whitelist: bare det som står i filteret. Blacklist: alt unntatt det som står i filteret.
+		return filterMode == FILTER_WHITELIST ? inFilter : !inFilter;
 	}
 
 	/** Legger stacken i lageret. Det som ikke får plass, spyttes ut midt på toppen av quarrien, uten fart. */

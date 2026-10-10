@@ -21,6 +21,7 @@ A simple quarry for Minecraft 26.3 (Fabric), inspired by Simple Quarries Plus.
 - Runs on furnace fuel: one smelt in a furnace = 12 blocks (coal = 96, lava bucket = 1200); empty buckets go to storage
 - 24-slot internal storage; overflow is ejected on top
 - Hopper support: pickaxes from the back, fuel from the sides, storage can be pulled from below
+- Item filter (whitelist / blacklist / disabled) that works on the drops; filtered-out items are destroyed. Silk Touch drops are filtered as what they actually drop (e.g. stone, not cobblestone).
 
 ## Crafting
 
@@ -40,7 +41,7 @@ R I R
 - [x] Fuel
 - [x] Use regular pickaxes in the quarry: the pickaxe type and its enchantments affect mining (e.g. Silk Touch mines with silk touch, Fortune gives fortune drops, Efficiency mines faster)
 - [x] Inventory
-- [ ] Item filter with three modes: whitelist / blacklist / disabled
+- [x] Item filter with three modes: whitelist / blacklist / disabled
 - [ ] Upgrades:
   - [ ] Speed upgrades (mine faster)
   - [ ] Area upgrades (larger mining area)

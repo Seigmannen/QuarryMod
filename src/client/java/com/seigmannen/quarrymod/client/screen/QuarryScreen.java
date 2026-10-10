@@ -124,5 +124,10 @@ public class QuarryScreen extends AbstractContainerScreen<QuarryMenu> {
 	protected void extractLabels(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		graphics.text(this.font, this.title, this.titleLabelX, this.titleLabelY, LABEL_COLOR, false);
 		drawStatus(graphics);
+		// Advarsel under filterknappen (knappen slutter på y = 132, filter-slotsene starter på x = 116).
+		if (this.menu.getFilterMode() == QuarryBlockEntity.FILTER_WHITELIST && this.menu.isFilterEmpty()) {
+			Component warning = Component.translatable("gui.quarrymod.filter.whitelist_empty").withStyle(ChatFormatting.YELLOW);
+			graphics.text(this.font, warning, 8, 137, 0xFFFFFFFF, true);
+		}
 	}
 }
