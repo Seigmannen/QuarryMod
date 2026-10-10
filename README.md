@@ -7,7 +7,7 @@ A simple quarry for Minecraft 26.3 (Fabric), inspired by Simple Quarries Plus.
 
 ## Features
 
-- Mines a 15x15 area centered on the quarry, layer by layer, starting from the layer below it and going down to the bottom of the world
+- Mines an area centered on the quarry (15x15 by default, larger with area upgrades), layer by layer, starting from the layer below it and going down to the bottom of the world
 - Mines in a fixed grid order starting at the back-left corner (relative to the front of the quarry)
 - Mining speed depends on the inserted pickaxe (10x slower than a player mining stone, e.g. about 3 seconds per block with a diamond pickaxe). All blocks take the same time.
 - Skips air, liquids and unbreakable blocks
@@ -22,6 +22,9 @@ A simple quarry for Minecraft 26.3 (Fabric), inspired by Simple Quarries Plus.
 - 24-slot internal storage; overflow is ejected on top
 - Hopper support: pickaxes from the back, fuel from the sides, storage can be pulled from below
 - Item filter (whitelist / blacklist / disabled) that works on the drops; filtered-out items are destroyed. Silk Touch drops are filtered as what they actually drop (e.g. stone, not cobblestone).
+- Speed upgrades I–V: reduce the slowdown factor step by step (10 → 7 → 5 → 3 → 2 → 1). Speed V also gives a Haste II effect, so Efficiency V on diamond, netherite or gold mines instantly. Fuel use does not change: the same amount of fuel per block mined.
+- Area upgrades I–V: 25x25, 35x35, 45x45, 55x55 and 65x65. A new size takes effect from the next layer.
+- Upgrade recipes: the previous tier in the center with 4 materials around it in a plus shape (iron, gold, emerald, diamond, netherite). Tier I uses a redstone block (speed) or an ender pearl (area) in the center.
 
 ## Crafting
 
@@ -36,15 +39,36 @@ R I R
 - **P** = Diamond Pickaxe
 - **D** = Dropper
 
+### Upgrades
+
+```
+. X .
+X U X
+. X .
+```
+
+- **.** = empty
+- **X** = material
+- **U** = center item
+
+| Tier | U (center)                                  | X (material)    |
+|------|---------------------------------------------|-----------------|
+| I    | Redstone Block (speed) / Ender Pearl (area) | Iron Ingot      |
+| II   | Tier I upgrade of the same type             | Gold Ingot      |
+| III  | Tier II upgrade                             | Emerald         |
+| IV   | Tier III upgrade                            | Diamond         |
+| V    | Tier IV upgrade                             | Netherite Ingot |
+
 ## Planned features
 
 - [x] Fuel
 - [x] Use regular pickaxes in the quarry: the pickaxe type and its enchantments affect mining (e.g. Silk Touch mines with silk touch, Fortune gives fortune drops, Efficiency mines faster)
 - [x] Inventory
 - [x] Item filter with three modes: whitelist / blacklist / disabled
-- [ ] Upgrades:
-  - [ ] Speed upgrades (mine faster)
-  - [ ] Area upgrades (larger mining area)
+- [x] Upgrades:
+  - [x] Speed upgrades (mine faster)
+  - [x] Area upgrades (larger mining area)
+- [ ] Liquid handling: before each layer, the quarry scans the layer and the ring just outside the mining area for liquids (including waterlogged blocks) and replaces them with common filler blocks from its storage (cobblestone, cobbled deepslate, dirt, gravel, netherrack, stone, deepslate). The outer ring is never mined, so it forms a wall against lakes and oceans. If no filler blocks are available, this step is skipped.
 
 ## Requirements
 

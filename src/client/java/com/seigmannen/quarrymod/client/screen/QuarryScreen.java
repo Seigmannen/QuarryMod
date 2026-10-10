@@ -2,6 +2,7 @@ package com.seigmannen.quarrymod.client.screen;
 
 import com.seigmannen.quarrymod.QuarryMod;
 import com.seigmannen.quarrymod.block.entity.QuarryBlockEntity;
+import com.seigmannen.quarrymod.item.ModItems;
 import com.seigmannen.quarrymod.menu.QuarryMenu;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
@@ -28,8 +29,16 @@ public class QuarryScreen extends AbstractContainerScreen<QuarryMenu> {
 	private static final int STATUS_CENTER_X = 25;
 	private static final int STATUS_LINE_1_Y = 76;
 	private static final int STATUS_LINE_2_Y = 86;
+	// Filterknappen (90x20) og advarselen sentrert under den.
+	private static final int FILTER_BUTTON_X = 8;
+	private static final int FILTER_BUTTON_Y = 100;
+	private static final int FILTER_BUTTON_WIDTH = 90;
+	private static final int WHITELIST_WARNING_Y = 124;
 	private static final ItemStack PICKAXE_ICON = new ItemStack(Items.IRON_PICKAXE);
 	private static final ItemStack FUEL_ICON = new ItemStack(Items.COAL);
+	// ModItems er alltid registrert før klienten åpner en GUI.
+	private static final ItemStack SPEED_UPGRADE_ICON = new ItemStack(ModItems.SPEED_UPGRADES[0]);
+	private static final ItemStack AREA_UPGRADE_ICON = new ItemStack(ModItems.AREA_UPGRADES[0]);
 
 	private Button filterButton;
 
@@ -47,7 +56,7 @@ public class QuarryScreen extends AbstractContainerScreen<QuarryMenu> {
 			if (this.minecraft.gameMode != null) {
 				this.minecraft.gameMode.handleInventoryButtonClick(this.menu.containerId, QuarryMenu.BUTTON_CYCLE_FILTER);
 			}
-		}).bounds(this.leftPos + 8, this.topPos + 112, 90, 20).build());
+		}).bounds(this.leftPos + FILTER_BUTTON_X, this.topPos + FILTER_BUTTON_Y, FILTER_BUTTON_WIDTH, 20).build());
 	}
 
 	// Oppdater knappeteksten når serveren har sendt ny modus.
@@ -96,12 +105,32 @@ public class QuarryScreen extends AbstractContainerScreen<QuarryMenu> {
 		// Falmede ikoner i tomme slots. Tegnes i bakgrunnen, så ekte items og hover-markering havner over.
 		Slot pickaxeSlot = this.menu.getSlot(QuarryMenu.PICKAXE_SLOT);
 		Slot fuelSlot = this.menu.getSlot(QuarryMenu.FUEL_SLOT);
+		Slot speedSlot = this.menu.getSlot(QuarryMenu.SPEED_UPGRADE_SLOT);
+		Slot areaSlot = this.menu.getSlot(QuarryMenu.AREA_UPGRADE_SLOT);
 		drawGhostItem(graphics, pickaxeSlot, PICKAXE_ICON);
 		drawGhostItem(graphics, fuelSlot, FUEL_ICON);
+		drawGhostItem(graphics, speedSlot, SPEED_UPGRADE_ICON);
+		drawGhostItem(graphics, areaSlot, AREA_UPGRADE_ICON);
 		// Items tegnes etter fills i samme lag, så vi går til et nytt lag før det grå laget legges over.
 		graphics.nextStratum();
 		drawGhostOverlay(graphics, pickaxeSlot);
 		drawGhostOverlay(graphics, fuelSlot);
+		drawGhostOverlay(graphics, speedSlot);
+		drawGhostOverlay(graphics, areaSlot);
+	}
+
+	// Tooltip over tomme upgrade-slots ("Speed Upgrade" / "Area Upgrade"), bare når man ikke holder noe.
+	@Override
+	protected void extractTooltip(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
+		super.extractTooltip(graphics, mouseX, mouseY);
+		if (this.hoveredSlot == null || this.hoveredSlot.hasItem() || !this.menu.getCarried().isEmpty()) {
+			return;
+		}
+		if (this.hoveredSlot.index == QuarryMenu.SPEED_UPGRADE_SLOT) {
+			graphics.setTooltipForNextFrame(this.font, Component.translatable("gui.quarrymod.slot.speed_upgrade"), mouseX, mouseY);
+		} else if (this.hoveredSlot.index == QuarryMenu.AREA_UPGRADE_SLOT) {
+			graphics.setTooltipForNextFrame(this.font, Component.translatable("gui.quarrymod.slot.area_upgrade"), mouseX, mouseY);
+		}
 	}
 
 	private void drawGhostItem(GuiGraphicsExtractor graphics, Slot slot, ItemStack icon) {
@@ -124,10 +153,11 @@ public class QuarryScreen extends AbstractContainerScreen<QuarryMenu> {
 	protected void extractLabels(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		graphics.text(this.font, this.title, this.titleLabelX, this.titleLabelY, LABEL_COLOR, false);
 		drawStatus(graphics);
-		// Advarsel under filterknappen (knappen slutter på y = 132, filter-slotsene starter på x = 116).
+		// Advarsel sentrert under filterknappen (knappen slutter på y = 120, upgrade-slotsene starter på y = 136).
 		if (this.menu.getFilterMode() == QuarryBlockEntity.FILTER_WHITELIST && this.menu.isFilterEmpty()) {
 			Component warning = Component.translatable("gui.quarrymod.filter.whitelist_empty").withStyle(ChatFormatting.YELLOW);
-			graphics.text(this.font, warning, 8, 137, 0xFFFFFFFF, true);
+			int x = FILTER_BUTTON_X + FILTER_BUTTON_WIDTH / 2 - this.font.width(warning) / 2;
+			graphics.text(this.font, warning, x, WHITELIST_WARNING_Y, 0xFFFFFFFF, true);
 		}
 	}
 }

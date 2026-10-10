@@ -1,6 +1,7 @@
 package com.seigmannen.quarrymod.menu;
 
 import com.seigmannen.quarrymod.block.entity.QuarryBlockEntity;
+import com.seigmannen.quarrymod.item.ModItems;
 import net.minecraft.world.Container;
 import net.minecraft.world.SimpleContainer;
 import net.minecraft.world.entity.player.Inventory;
@@ -17,17 +18,21 @@ import org.jspecify.annotations.Nullable;
  * Menyen (server- og klientsiden av GUI-en). Den holder slotsene og synkroniserer innhold og tall.
  *
  * Slot-rekkefølge i menyen:
- * 0 = pickaxe, 1 = fuel, 2–25 = lager, 26–34 = filter (ghost), 35–61 = inventory, 62–70 = hotbar.
+ * 0 = pickaxe, 1 = fuel, 2–25 = lager, 26 = speed-oppgradering, 27 = area-oppgradering,
+ * 28–36 = filter (ghost), 37–63 = inventory, 64–72 = hotbar.
+ * Slot 0–27 har samme nummer som i block entityen.
  */
 public class QuarryMenu extends AbstractContainerMenu {
-	public static final int PICKAXE_SLOT = 0;
-	public static final int FUEL_SLOT = 1;
-	public static final int STORAGE_START = 2;
-	public static final int STORAGE_END = STORAGE_START + QuarryBlockEntity.STORAGE_SIZE;   // 26 (eksklusiv)
-	public static final int FILTER_START = STORAGE_END;
-	public static final int FILTER_END = FILTER_START + QuarryBlockEntity.FILTER_SIZE;       // 35
+	public static final int PICKAXE_SLOT = QuarryBlockEntity.PICKAXE_SLOT;
+	public static final int FUEL_SLOT = QuarryBlockEntity.FUEL_SLOT;
+	public static final int STORAGE_START = QuarryBlockEntity.STORAGE_START;
+	public static final int STORAGE_END = QuarryBlockEntity.STORAGE_END;                     // 26 (eksklusiv)
+	public static final int SPEED_UPGRADE_SLOT = QuarryBlockEntity.SPEED_UPGRADE_SLOT;       // 26
+	public static final int AREA_UPGRADE_SLOT = QuarryBlockEntity.AREA_UPGRADE_SLOT;         // 27
+	public static final int FILTER_START = QuarryBlockEntity.CONTAINER_SIZE;                 // 28
+	public static final int FILTER_END = FILTER_START + QuarryBlockEntity.FILTER_SIZE;       // 37
 	public static final int PLAYER_START = FILTER_END;
-	public static final int PLAYER_END = PLAYER_START + 36;                                   // 71
+	public static final int PLAYER_END = PLAYER_START + 36;                                   // 73
 
 	/** Knapp-ID som sendes med clickMenuButton når filterknappen trykkes. */
 	public static final int BUTTON_CYCLE_FILTER = 0;
@@ -71,6 +76,10 @@ public class QuarryMenu extends AbstractContainerMenu {
 				this.addSlot(new OutputSlot(container, index, 62 + c * 18, 18 + r * 18));
 			}
 		}
+
+		// Oppgraderinger: hver slot godtar bare sin egen type, maks 1.
+		this.addSlot(new UpgradeSlot(container, SPEED_UPGRADE_SLOT, 34, 137));
+		this.addSlot(new UpgradeSlot(container, AREA_UPGRADE_SLOT, 56, 137));
 
 		// Filter 3x3.
 		for (int r = 0; r < 3; r++) {
@@ -154,7 +163,7 @@ public class QuarryMenu extends AbstractContainerMenu {
 
 	/**
 	 * Shift-klikk. Fra quarrien: til spillerens inventory.
-	 * Fra spilleren: pickaxe til pickaxe-slotten, fuel til fuel-slotten, ellers ingenting.
+	 * Fra spilleren: oppgraderinger til sin slot, pickaxe til pickaxe-slotten, fuel til fuel-slotten, ellers ingenting.
 	 */
 	@Override
 	public ItemStack quickMoveStack(Player player, int index) {
@@ -171,7 +180,13 @@ public class QuarryMenu extends AbstractContainerMenu {
 			}
 		} else {
 			boolean moved = false;
-			if (QuarryBlockEntity.isPickaxe(stack)) {
+			// Oppgraderinger til sin egen slot (maks 1).
+			if (ModItems.getSpeedLevel(stack) > 0) {
+				moved = this.moveItemStackTo(stack, SPEED_UPGRADE_SLOT, SPEED_UPGRADE_SLOT + 1, false);
+			} else if (ModItems.getAreaLevel(stack) > 0) {
+				moved = this.moveItemStackTo(stack, AREA_UPGRADE_SLOT, AREA_UPGRADE_SLOT + 1, false);
+			}
+			if (!moved && QuarryBlockEntity.isPickaxe(stack)) {
 				moved = this.moveItemStackTo(stack, PICKAXE_SLOT, PICKAXE_SLOT + 1, false);
 			}
 			// F.eks. trepickaxe er også fuel: prøv fuel-slotten hvis pickaxe-slotten er opptatt.
@@ -234,6 +249,25 @@ public class QuarryMenu extends AbstractContainerMenu {
 		@Override
 		public boolean mayPlace(ItemStack stack) {
 			return QuarryBlockEntity.isFuel(stack);
+		}
+	}
+
+	/** Speed- eller area-oppgradering: godtar bare sin egen type, maks 1. */
+	private static class UpgradeSlot extends Slot {
+		UpgradeSlot(Container container, int index, int x, int y) {
+			super(container, index, x, y);
+		}
+
+		@Override
+		public boolean mayPlace(ItemStack stack) {
+			return getContainerSlot() == SPEED_UPGRADE_SLOT
+					? ModItems.getSpeedLevel(stack) > 0
+					: ModItems.getAreaLevel(stack) > 0;
+		}
+
+		@Override
+		public int getMaxStackSize() {
+			return 1;
 		}
 	}
 

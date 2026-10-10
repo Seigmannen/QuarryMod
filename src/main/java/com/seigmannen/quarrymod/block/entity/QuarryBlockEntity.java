@@ -1,6 +1,7 @@
 package com.seigmannen.quarrymod.block.entity;
 
 import com.seigmannen.quarrymod.block.QuarryBlock;
+import com.seigmannen.quarrymod.item.ModItems;
 import com.seigmannen.quarrymod.menu.QuarryMenu;
 import java.util.List;
 import java.util.stream.IntStream;
@@ -44,11 +45,11 @@ import net.minecraft.world.level.storage.ValueOutput;
 /**
  * Block entity-en til quarrien. Her ligger all mining-logikken og dataene som skal huskes.
  *
- * Området er et 15x15 "sjakkbrett" med quarrien over H8:
- * - Kolonner A–O (lagres som 0–14). A er lengst til venstre sett fra en spiller som ser på fronten.
- * - Rader 1–15 (lagres som 0–14). Rad 1 er lengst bak (motsatt side av fronten).
+ * Området er et "sjakkbrett" (15x15 uten area-oppgradering, opptil 65x65) med quarrien over midten:
+ * - Kolonner lagres som 0 til størrelse - 1. Kolonne 0 er lengst til venstre sett fra en spiller som ser på fronten.
+ * - Rader lagres som 0 til størrelse - 1. Rad 0 er lengst bak (motsatt side av fronten).
  *
- * Inventory: slot 0 = pickaxe, slot 1 = fuel, slot 2–25 = lager.
+ * Inventory: slot 0 = pickaxe, slot 1 = fuel, slot 2–25 = lager, slot 26 = speed-, slot 27 = area-oppgradering.
  * BaseContainerBlockEntity gjør at innholdet droppes automatisk når blokken brytes.
  * WorldlyContainer styrer hva hoppere får ta ut / sette inn fra hver side.
  * Filteret er en egen liste med kopier og er IKKE en del av inventoryet (så det droppes ikke).
@@ -56,9 +57,12 @@ import net.minecraft.world.level.storage.ValueOutput;
 public class QuarryBlockEntity extends BaseContainerBlockEntity implements WorldlyContainer {
 	/**
 	 * Fartsfaktor: tiden per blokk = tiden pickaxen bruker på stein i vanilla, ganget med denne.
-	 * Endre her for å justere farten (høyere = tregere).
+	 * Indeks = speed-oppgraderingens nivå (0 = ingen, 1–5 = I–V). Høyere = tregere.
 	 */
-	public static final int SPEED_FACTOR = 10;
+	private static final int[] SPEED_FACTORS = {10, 7, 5, 3, 2, 1};
+	/** Speed V gir i tillegg samme effekt som Haste II: miningSpeed * 1,4. */
+	private static final float HASTE_MULTIPLIER = 1.4F;
+	private static final int HASTE_SPEED_LEVEL = 5;
 
 	/** Stein (hardhet 1,5). Alle blokker mines med samme fart som denne. */
 	private static final float REFERENCE_HARDNESS = 1.5F;
@@ -67,12 +71,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	/** Fremdriften telles fra 0 til 1; litt slingringsmonn for avrundingsfeil i float. */
 	private static final float PROGRESS_DONE = 1.0F - 1.0E-4F;
 
-	/** Størrelsen på området (15x15) og hvor langt det går til hver side fra midten (7). */
-	private static final int SIZE = 15;
-	private static final int RADIUS = SIZE / 2;
-
-	/** Maks antall posisjoner som kan hoppes over i én tick (ett helt lag), for å unngå lag. */
-	private static final int MAX_SKIPS_PER_TICK = SIZE * SIZE;
+	/** Sidelengden på området. Indeks = area-oppgraderingens nivå (0 = ingen, 1–5 = I–V). Alltid oddetall. */
+	private static final int[] AREA_SIZES = {15, 25, 35, 45, 55, 65};
 
 	// --- Fuel ---
 	/** Én smelting i en ovn (200 ticks brenntid) = 12 blokker, så hver tick brenntid gir 12 poeng. */
@@ -85,11 +85,14 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	public static final int FUEL_SLOT = 1;
 	public static final int STORAGE_START = 2;
 	public static final int STORAGE_SIZE = 24;
-	public static final int CONTAINER_SIZE = STORAGE_START + STORAGE_SIZE; // 26
+	public static final int STORAGE_END = STORAGE_START + STORAGE_SIZE;  // 26 (eksklusiv)
+	public static final int SPEED_UPGRADE_SLOT = STORAGE_END;            // 26
+	public static final int AREA_UPGRADE_SLOT = STORAGE_END + 1;         // 27
+	public static final int CONTAINER_SIZE = STORAGE_END + 2;            // 28
 	public static final int FILTER_SIZE = 9;
 
 	/** Slotsene en hopper under quarrien kan trekke fra (bare lageret). */
-	private static final int[] STORAGE_SLOTS = IntStream.range(STORAGE_START, CONTAINER_SIZE).toArray();
+	private static final int[] STORAGE_SLOTS = IntStream.range(STORAGE_START, STORAGE_END).toArray();
 	/** Slotten en hopper på baksiden kan sette inn i. */
 	private static final int[] PICKAXE_SLOTS = {PICKAXE_SLOT};
 	/** Slotten en hopper på venstre/høyre side kan sette inn i. */
@@ -156,9 +159,12 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	};
 
 	// --- Data som lagres ---
-	private int column = 0;    // 0 = A, 14 = O
-	private int row = 0;       // 0 = rad 1, 14 = rad 15
+	private int column = 0;    // 0 = lengst til venstre
+	private int row = 0;       // 0 = lengst bak
 	private int layer = 0;     // 0 = laget rett under quarrien (y - 1), 1 = y - 2, osv.
+	// Sidelengden på laget som pågår. Settes når laget starter (0 = ikke startet ennå), og holdes fast
+	// ut laget selv om area-oppgraderingen byttes, så det aldri blir hull eller dobbelt mining.
+	private int layerSize = 0;
 	// Hvor langt vi har kommet på blokken vi holder på med (0 til 1). Lagres som andel, slik at
 	// fremdriften beholdes hvis pickaxen byttes, mens den nye farten gjelder for resten.
 	private float progress = 0.0F;
@@ -197,7 +203,15 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		}
 
 		int skipped = 0;
-		while (skipped < MAX_SKIPS_PER_TICK) {
+		while (true) {
+			// Nytt lag: lås størrelsen fra area-oppgraderingen som står i nå.
+			if (quarry.layerSize == 0) {
+				quarry.layerSize = AREA_SIZES[ModItems.getAreaLevel(quarry.items.get(AREA_UPGRADE_SLOT))];
+			}
+			// Maks ett helt lag med gratis overhopp per tick, for å unngå lag.
+			if (skipped >= quarry.layerSize * quarry.layerSize) {
+				break;
+			}
 			BlockPos target = quarry.getTargetPos(state);
 
 			// Har vi gått under bunnen av verden? Da er vi ferdige.
@@ -228,7 +242,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 			}
 
 			// Legg til én tick med pickaxens fart.
-			quarry.progress += 1.0F / ticksPerBlock(serverLevel, pickaxe);
+			quarry.progress += 1.0F / quarry.ticksPerBlock(serverLevel, pickaxe);
 			if (quarry.progress >= PROGRESS_DONE) {
 				quarry.mineBlock(serverLevel, target, targetState, pickaxe);
 				quarry.fuelStored -= POINTS_PER_BLOCK;
@@ -241,10 +255,15 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	}
 
 	/**
-	 * Hvor mange ticks én blokk tar med denne pickaxen:
-	 * ceil(30 * 1,5 * SPEED_FACTOR / miningSpeed), minst 1. (Vanilla: 30 * hardhet / fart med riktig verktøy.)
+	 * Hvor mange ticks én blokk tar med denne pickaxen og speed-oppgraderingen som står i nå:
+	 * ceil(30 * 1,5 * fartsfaktor / (miningSpeed * hasteFaktor)), minst 1. (Vanilla: 30 * hardhet / fart.)
+	 * Regnes ut hver tick, så et bytte av oppgradering gjelder med en gang, mens fremdriften (andel) beholdes.
 	 */
-	private static int ticksPerBlock(ServerLevel level, ItemStack pickaxe) {
+	private int ticksPerBlock(ServerLevel level, ItemStack pickaxe) {
+		int speedLevel = ModItems.getSpeedLevel(items.get(SPEED_UPGRADE_SLOT));
+		int speedFactor = SPEED_FACTORS[speedLevel];
+		float hasteFactor = speedLevel >= HASTE_SPEED_LEVEL ? HASTE_MULTIPLIER : 1.0F;
+
 		// Farten på stein hentes fra itemets Tool-komponent, så det virker for alle pickaxer (også fra andre mods).
 		Tool tool = pickaxe.get(DataComponents.TOOL);
 		float miningSpeed = tool != null ? tool.getMiningSpeed(REFERENCE_BLOCK) : 1.0F;
@@ -261,7 +280,12 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 			}
 		}
 
-		int ticks = Mth.ceil(30.0F * REFERENCE_HARDNESS * SPEED_FACTOR / miningSpeed);
+		float totalSpeed = miningSpeed * hasteFactor;
+		// Insta-mining som i vanilla: med fartsfaktor 1 og fart >= 45 (30 * 1,5) knuses blokken på 1 tick.
+		if (speedFactor == 1 && totalSpeed >= 30.0F * REFERENCE_HARDNESS) {
+			return 1;
+		}
+		int ticks = Mth.ceil(30.0F * REFERENCE_HARDNESS * speedFactor / totalSpeed);
 		return Math.max(1, ticks);
 	}
 
@@ -332,10 +356,12 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		// Venstre for spilleren: drei synsretningen 90 grader mot klokka.
 		Direction left = back.getCounterClockWise();
 
-		// Rad 1 (row 0) er 7 blokker bak, rad 15 (row 14) er 7 blokker foran.
-		int backOffset = RADIUS - row;
-		// Kolonne A (column 0) er 7 blokker til venstre, kolonne O (column 14) 7 til høyre.
-		int leftOffset = RADIUS - column;
+		// Radius = hvor langt området går til hver side fra midten (7 for 15x15, 32 for 65x65).
+		int radius = layerSize / 2;
+		// Rad 0 er radius blokker bak, siste rad er radius blokker foran.
+		int backOffset = radius - row;
+		// Kolonne 0 er radius blokker til venstre, siste kolonne radius til høyre.
+		int leftOffset = radius - column;
 
 		return this.worldPosition
 				.below(1 + layer)
@@ -344,17 +370,19 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	}
 
 	/**
-	 * Går til neste rute: A1, B1 … O1, A2 … O15, og deretter ett lag ned.
+	 * Går til neste rute: venstre mot høyre, rad for rad mot fronten, og deretter ett lag ned.
 	 */
 	private void advance() {
 		progress = 0.0F;
 		column++;
-		if (column >= SIZE) {
+		if (column >= layerSize) {
 			column = 0;
 			row++;
-			if (row >= SIZE) {
+			if (row >= layerSize) {
 				row = 0;
 				layer++;
+				// Neste lag henter størrelsen på nytt fra area-oppgraderingen.
+				layerSize = 0;
 			}
 		}
 	}
@@ -466,7 +494,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	private ItemStack insertIntoStorage(ItemStack stack) {
 		ItemStack rest = stack.copy();
 		// Runde 1: fyll opp eksisterende stacks av samme item.
-		for (int i = STORAGE_START; i < CONTAINER_SIZE && !rest.isEmpty(); i++) {
+		for (int i = STORAGE_START; i < STORAGE_END && !rest.isEmpty(); i++) {
 			ItemStack existing = items.get(i);
 			if (!existing.isEmpty() && ItemStack.isSameItemSameComponents(existing, rest)) {
 				int move = Math.min(rest.getCount(), existing.getMaxStackSize() - existing.getCount());
@@ -477,7 +505,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 			}
 		}
 		// Runde 2: tomme slots.
-		for (int i = STORAGE_START; i < CONTAINER_SIZE && !rest.isEmpty(); i++) {
+		for (int i = STORAGE_START; i < STORAGE_END && !rest.isEmpty(); i++) {
 			if (items.get(i).isEmpty()) {
 				items.set(i, rest.split(rest.getMaxStackSize()));
 			}
@@ -556,6 +584,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		return switch (slot) {
 			case PICKAXE_SLOT -> isPickaxe(stack);
 			case FUEL_SLOT -> isFuel(stack);
+			case SPEED_UPGRADE_SLOT -> ModItems.getSpeedLevel(stack) > 0;
+			case AREA_UPGRADE_SLOT -> ModItems.getAreaLevel(stack) > 0;
 			default -> false;
 		};
 	}
@@ -564,6 +594,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 
 	// Undersiden: lageret (bare uttak). Baksiden: pickaxe-slotten (bare innsetting).
 	// Venstre/høyre: fuel-slotten (bare innsetting). Fronten og toppen: ingenting.
+	// Upgrade-slotsene er aldri med, så hoppere verken setter inn i eller trekker ut av dem.
 	@Override
 	public int[] getSlotsForFace(Direction side) {
 		if (side == Direction.DOWN) {
@@ -605,7 +636,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	// Det som står under (hopper o.l.) kan trekke fra lageret, aldri fra pickaxe/fuel.
 	@Override
 	public boolean canTakeItemThroughFace(int slot, ItemStack stack, Direction side) {
-		return side == Direction.DOWN && slot >= STORAGE_START && slot < CONTAINER_SIZE;
+		return side == Direction.DOWN && slot >= STORAGE_START && slot < STORAGE_END;
 	}
 
 	// --- Lagring ---
@@ -617,6 +648,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		output.putInt("Column", column);
 		output.putInt("Row", row);
 		output.putInt("Layer", layer);
+		output.putInt("LayerSize", layerSize);
 		output.putFloat("MiningProgress", progress);
 		output.putBoolean("Finished", finished);
 		output.putLong("FuelStored", fuelStored);
@@ -632,6 +664,9 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		column = input.getIntOr("Column", 0);
 		row = input.getIntOr("Row", 0);
 		layer = input.getIntOr("Layer", 0);
+		// Gamle lagringer uten LayerSize var alltid 15x15; har de startet på laget, fullføres det med 15.
+		int oldDefault = column > 0 || row > 0 ? AREA_SIZES[0] : 0;
+		layerSize = input.getIntOr("LayerSize", oldDefault);
 		// Ny nøkkel (andel 0–1). Gamle lagringer med "Progress" i ticks starter blokken på nytt.
 		progress = input.getFloatOr("MiningProgress", 0.0F);
 		finished = input.getBooleanOr("Finished", false);
