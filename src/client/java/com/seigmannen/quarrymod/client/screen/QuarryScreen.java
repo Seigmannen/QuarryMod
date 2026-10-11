@@ -27,6 +27,7 @@ public class QuarryScreen extends AbstractContainerScreen<QuarryMenu> {
 	private static final int GHOST_OVERLAY_COLOR = 0x998B8B8B;
 	// Status-teksten: sentrert om midten av fuel-slotten (x = 17 + 8), over skillelinjen på y = 94.
 	private static final int STATUS_CENTER_X = 25;
+	private static final int STATUS_MIN_X = 4;
 	private static final int STATUS_LINE_1_Y = 76;
 	private static final int STATUS_LINE_2_Y = 86;
 	// Filterknappen (90x20) og advarselen sentrert under den.
@@ -84,14 +85,25 @@ public class QuarryScreen extends AbstractContainerScreen<QuarryMenu> {
 				drawStatusLine(graphics, Component.literal(Integer.toString(this.menu.getRemainingBlocks())).withStyle(ChatFormatting.GREEN), STATUS_LINE_1_Y);
 				drawStatusLine(graphics, Component.translatable("gui.quarrymod.status.blocks").withStyle(ChatFormatting.GREEN), STATUS_LINE_2_Y);
 			}
+			case QuarryBlockEntity.STATUS_NO_FILLER -> {
+				// Venter på fyllblokker. Linje 2 kan være tom (f.eks. "No filler" på engelsk).
+				drawStatusLine(graphics, Component.translatable("gui.quarrymod.status.no_filler_1").withStyle(ChatFormatting.YELLOW), STATUS_LINE_1_Y);
+				Component line2 = Component.translatable("gui.quarrymod.status.no_filler_2").withStyle(ChatFormatting.YELLOW);
+				if (!line2.getString().isEmpty()) {
+					drawStatusLine(graphics, line2, STATUS_LINE_2_Y);
+				}
+			}
 			default ->
 					drawStatusLine(graphics, Component.translatable("gui.quarrymod.status.empty").withStyle(ChatFormatting.RED), STATUS_LINE_1_Y);
 		}
 	}
 
-	/** Sentrert under fuel-slotten. Med skygge, så gult/grønt er lett å lese på den grå bakgrunnen. */
+	/**
+	 * Sentrert under fuel-slotten. Med skygge, så gult/grønt er lett å lese på den grå bakgrunnen.
+	 * Lange ord (f.eks. "fyllblokker") skyves inn slik at de ikke går utenfor kanten av GUI-en.
+	 */
 	private void drawStatusLine(GuiGraphicsExtractor graphics, Component text, int y) {
-		int x = STATUS_CENTER_X - this.font.width(text) / 2;
+		int x = Math.max(STATUS_MIN_X, STATUS_CENTER_X - this.font.width(text) / 2);
 		graphics.text(this.font, text, x, y, 0xFFFFFFFF, true);
 	}
 

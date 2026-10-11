@@ -19,5 +19,8 @@
   "gui.quarrymod.filter.whitelist_empty": "Hvitelisten er tom",
   "gui.quarrymod.status.empty": "Tom",
   "gui.quarrymod.status.ready": "Klar",
-  "gui.quarrymod.status.blocks": "blokker"
+  "gui.quarrymod.status.blocks": "blokker",
+  "gui.quarrymod.status.no_filler_1": "Mangler",
+  "gui.quarrymod.status.no_filler_2": "fyllblokker",
+  "tag.item.quarrymod.filler_blocks": "Fyllblokker"
 }

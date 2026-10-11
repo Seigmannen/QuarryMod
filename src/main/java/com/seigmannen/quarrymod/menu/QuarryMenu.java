@@ -163,7 +163,8 @@ public class QuarryMenu extends AbstractContainerMenu {
 
 	/**
 	 * Shift-klikk. Fra quarrien: til spillerens inventory.
-	 * Fra spilleren: oppgraderinger til sin slot, pickaxe til pickaxe-slotten, fuel til fuel-slotten, ellers ingenting.
+	 * Fra spilleren: oppgraderinger til sin slot, pickaxe til pickaxe-slotten, fuel til fuel-slotten,
+	 * fyllblokker til lageret, ellers ingenting.
 	 */
 	@Override
 	public ItemStack quickMoveStack(Player player, int index) {
@@ -192,6 +193,10 @@ public class QuarryMenu extends AbstractContainerMenu {
 			// F.eks. trepickaxe er også fuel: prøv fuel-slotten hvis pickaxe-slotten er opptatt.
 			if (!moved && QuarryBlockEntity.isFuel(stack)) {
 				moved = this.moveItemStackTo(stack, FUEL_SLOT, FUEL_SLOT + 1, false);
+			}
+			// Fyllblokker til lageret.
+			if (!moved && QuarryBlockEntity.isFillerBlock(stack)) {
+				moved = this.moveItemStackTo(stack, STORAGE_START, STORAGE_END, false);
 			}
 			if (!moved) {
 				return ItemStack.EMPTY;
@@ -271,7 +276,7 @@ public class QuarryMenu extends AbstractContainerMenu {
 		}
 	}
 
-	/** Lageret: spilleren kan ta ut, men ikke legge inn. */
+	/** Lageret: spilleren kan ta ut alt, men bare legge inn fyllblokker. */
 	private static class OutputSlot extends Slot {
 		OutputSlot(Container container, int index, int x, int y) {
 			super(container, index, x, y);
@@ -279,7 +284,7 @@ public class QuarryMenu extends AbstractContainerMenu {
 
 		@Override
 		public boolean mayPlace(ItemStack stack) {
-			return false;
+			return QuarryBlockEntity.isFillerBlock(stack);
 		}
 	}
 

@@ -1,5 +1,6 @@
 package com.seigmannen.quarrymod.block.entity;
 
+import com.seigmannen.quarrymod.QuarryMod;
 import com.seigmannen.quarrymod.block.QuarryBlock;
 import com.seigmannen.quarrymod.item.ModItems;
 import com.seigmannen.quarrymod.menu.QuarryMenu;
@@ -15,6 +16,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.tags.ItemTags;
+import net.minecraft.tags.TagKey;
 import net.minecraft.util.Mth;
 import net.minecraft.world.ContainerHelper;
 import net.minecraft.world.SimpleContainer;
@@ -23,6 +25,8 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.ContainerData;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ItemStackTemplate;
 import net.minecraft.world.item.component.CookingFuel;
@@ -34,10 +38,10 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.HopperBlock;
 import net.minecraft.world.level.block.HorizontalDirectionalBlock;
-import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.entity.BaseContainerBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.storage.loot.providers.number.ints.ResolvableInt;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
@@ -53,6 +57,10 @@ import net.minecraft.world.level.storage.ValueOutput;
  * BaseContainerBlockEntity gjør at innholdet droppes automatisk når blokken brytes.
  * WorldlyContainer styrer hva hoppere får ta ut / sette inn fra hver side.
  * Filteret er en egen liste med kopier og er IKKE en del av inventoryet (så det droppes ikke).
+ *
+ * Væske: før hvert lag skannes laget + ringen rett utenfor. Væske (og "alltid-vann"-blokker som kelp)
+ * fylles med fyllblokker fra lageret, én om gangen i mining-fart. Waterlogged blokker tømmes for vann med en gang.
+ * Mangler fyllblokker, venter quarrien (NEEDS_FILLER = blå front). Ringen mines aldri, så den blir en vegg.
  */
 public class QuarryBlockEntity extends BaseContainerBlockEntity implements WorldlyContainer {
 	/**
@@ -73,6 +81,14 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 
 	/** Sidelengden på området. Indeks = area-oppgraderingens nivå (0 = ingen, 1–5 = I–V). Alltid oddetall. */
 	private static final int[] AREA_SIZES = {15, 25, 35, 45, 55, 65};
+
+	// --- Væskehåndtering ---
+	/** Items som kan brukes som fyllblokker mot væske (data/quarrymod/tags/item/filler_blocks.json). */
+	public static final TagKey<Item> FILLER_BLOCKS = TagKey.create(Registries.ITEM, QuarryMod.id("filler_blocks"));
+	/** En hopper under quarrien får ikke trekke ut fyllblokker hvis det blir færre enn dette igjen. */
+	public static final int FILLER_RESERVE = 64;
+	/** scanIndex-verdi som betyr "laget er ferdig skannet" (brukes for gamle lagringer midt i et lag). */
+	private static final int SCAN_DONE = Integer.MAX_VALUE;
 
 	// --- Fuel ---
 	/** Én smelting i en ovn (200 ticks brenntid) = 12 blokker, så hver tick brenntid gir 12 poeng. */
@@ -103,6 +119,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	public static final int STATUS_EMPTY = 0;    // ingen fuel
 	public static final int STATUS_READY = 1;    // fuel, men ingen pickaxe
 	public static final int STATUS_RUNNING = 2;  // fuel og pickaxe
+	public static final int STATUS_NO_FILLER = 3; // venter på fyllblokker
 
 	// --- Filtermodus ---
 	public static final int FILTER_DISABLED = 0;
@@ -168,6 +185,10 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	// Hvor langt vi har kommet på blokken vi holder på med (0 til 1). Lagres som andel, slik at
 	// fremdriften beholdes hvis pickaxen byttes, mens den nye farten gjelder for resten.
 	private float progress = 0.0F;
+	// Hvor langt skanningen av laget + ringen rundt har kommet (indeks i (layerSize + 2)²-rutenettet).
+	private int scanIndex = 0;
+	// Fremdrift (0 til 1) på fyllblokken som plasseres nå under skanningen.
+	private float fillProgress = 0.0F;
 	private boolean finished = false;
 	// Internt fuel-lager i poeng (heltall, så vi slipper avrunding). Long i tilfelle mod-fuel med enorm brenntid.
 	private long fuelStored = 0;
@@ -184,24 +205,32 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		if (!(level instanceof ServerLevel serverLevel)) {
 			return;
 		}
+		// NEEDS_FILLER er bare true de tickene quarrien faktisk venter på fyllblokker.
+		boolean waitingForFiller = tickQuarry(serverLevel, pos, state, quarry);
+		setNeedsFiller(level, pos, waitingForFiller);
+	}
+
+	/** Selve tikken. Returnerer true hvis quarrien står og venter på fyllblokker. */
+	private static boolean tickQuarry(ServerLevel level, BlockPos pos, BlockState state, QuarryBlockEntity quarry) {
 		if (quarry.finished) {
 			// Sørg for at blokken viser "ferdig"-fronten (f.eks. for quarries som ble ferdige før FINISHED fantes).
 			markFinished(level, pos, state);
-			return;
+			return false;
 		}
 		// Uten pickaxe står quarrien stille, men beholder posisjon og fremdrift.
 		ItemStack pickaxe = quarry.items.get(PICKAXE_SLOT);
 		if (pickaxe.isEmpty()) {
-			return;
+			return false;
 		}
 		// Last inn ett fuel-item med en gang det er pickaxe (også under pause), så GUI-en viser antall blokker
 		// i stedet for "Empty". Poengene brukes først når en blokk faktisk mines.
-		quarry.ensureFuel(serverLevel);
+		quarry.ensureFuel(level);
 		// Redstone-signal = pause. Vi gjør ingenting mer, så posisjon og fremdrift beholdes som de er.
 		if (state.getValue(QuarryBlock.POWERED)) {
-			return;
+			return false;
 		}
 
+		boolean waitingForFiller = false;
 		int skipped = 0;
 		while (true) {
 			// Nytt lag: lås størrelsen fra area-oppgraderingen som står i nå.
@@ -220,7 +249,20 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 				quarry.progress = 0.0F;
 				quarry.setChanged();
 				markFinished(level, pos, state);
-				return;
+				return false;
+			}
+
+			// Nytt lag: skann laget + ringen rundt for væske før vi miner. Bare når vi ellers ville minet (fuel),
+			// men fyllingen trekker ikke fuel.
+			if (!quarry.isScanDone()) {
+				if (!quarry.ensureFuel(level)) {
+					break;
+				}
+				waitingForFiller = quarry.scanLayer(level, state, pickaxe);
+				// Ikke ferdig (fyller, venter på fyllblokker eller chunk ikke lastet): fortsett neste tick.
+				if (!quarry.isScanDone()) {
+					break;
+				}
 			}
 
 			// Er chunken der målet ligger ikke lastet? Vent her og prøv igjen senere.
@@ -237,14 +279,14 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 			}
 
 			// En blokk som skal mines: sørg for fuel til hele blokken. Ellers står vi stille med fremdriften intakt.
-			if (!quarry.ensureFuel(serverLevel)) {
+			if (!quarry.ensureFuel(level)) {
 				break;
 			}
 
 			// Legg til én tick med pickaxens fart.
-			quarry.progress += 1.0F / quarry.ticksPerBlock(serverLevel, pickaxe);
+			quarry.progress += 1.0F / quarry.ticksPerBlock(level, pickaxe);
 			if (quarry.progress >= PROGRESS_DONE) {
-				quarry.mineBlock(serverLevel, target, targetState, pickaxe);
+				quarry.mineBlock(level, target, targetState, pickaxe);
 				quarry.fuelStored -= POINTS_PER_BLOCK;
 				quarry.advance();
 			}
@@ -252,6 +294,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		}
 		// Si fra til Minecraft at dataene er endret, slik at de blir lagret.
 		quarry.setChanged();
+		return waitingForFiller;
 	}
 
 	/**
@@ -344,24 +387,34 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		}
 	}
 
+	/** Setter NEEDS_FILLER (blå front) bare hvis verdien har endret seg. Leser staten på nytt, siden den kan ha endret seg i tikken. */
+	private static void setNeedsFiller(Level level, BlockPos pos, boolean needsFiller) {
+		BlockState current = level.getBlockState(pos);
+		if (current.getBlock() instanceof QuarryBlock && current.getValue(QuarryBlock.NEEDS_FILLER) != needsFiller) {
+			level.setBlock(pos, current.setValue(QuarryBlock.NEEDS_FILLER, needsFiller), Block.UPDATE_CLIENTS);
+		}
+	}
+
 	/**
 	 * Regner ut verdensposisjonen til ruten (column, row) på laget vi er på,
 	 * ut fra hvilken vei quarrien vender (FACING).
 	 */
 	private BlockPos getTargetPos(BlockState state) {
+		// Radius = hvor langt området går til hver side fra midten (7 for 15x15, 32 for 65x65).
+		int radius = layerSize / 2;
+		// Rad 0 er radius blokker bak, siste rad er radius blokker foran.
+		// Kolonne 0 er radius blokker til venstre, siste kolonne radius til høyre.
+		return getLayerPos(state, radius - row, radius - column);
+	}
+
+	/** Posisjonen på laget vi er på, gitt antall blokker bak og til venstre for midten (negativt = foran/høyre). */
+	private BlockPos getLayerPos(BlockState state, int backOffset, int leftOffset) {
 		Direction front = state.getValue(HorizontalDirectionalBlock.FACING);
 		// En spiller som ser på fronten, ser i motsatt retning av fronten.
 		// "Bak" quarrien er altså samme retning som spilleren ser.
 		Direction back = front.getOpposite();
 		// Venstre for spilleren: drei synsretningen 90 grader mot klokka.
 		Direction left = back.getCounterClockWise();
-
-		// Radius = hvor langt området går til hver side fra midten (7 for 15x15, 32 for 65x65).
-		int radius = layerSize / 2;
-		// Rad 0 er radius blokker bak, siste rad er radius blokker foran.
-		int backOffset = radius - row;
-		// Kolonne 0 er radius blokker til venstre, siste kolonne radius til høyre.
-		int leftOffset = radius - column;
 
 		return this.worldPosition
 				.below(1 + layer)
@@ -381,10 +434,105 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 			if (row >= layerSize) {
 				row = 0;
 				layer++;
-				// Neste lag henter størrelsen på nytt fra area-oppgraderingen.
+				// Neste lag henter størrelsen på nytt fra area-oppgraderingen, og skannes på nytt.
 				layerSize = 0;
+				scanIndex = 0;
 			}
 		}
+	}
+
+	// --- Væskehåndtering ---
+
+	/** Om laget (pluss ringen rundt) er ferdig skannet. */
+	private boolean isScanDone() {
+		int side = layerSize + 2;
+		return scanIndex >= side * side;
+	}
+
+	/**
+	 * Skanner laget pluss ringen rett utenfor (f.eks. 17x17 for et 15x15-område), fra der vi slapp sist.
+	 * Posisjoner uten væske koster ingen tid, og waterlogged blokker tømmes med en gang.
+	 * Væske tar like lang tid å fylle som én blokk å mine, så skanningen stopper ved hver fylling.
+	 * Stopper også hvis en posisjon ligger i en chunk som ikke er lastet.
+	 * Returnerer true hvis den står og venter på fyllblokker.
+	 */
+	private boolean scanLayer(ServerLevel level, BlockState state, ItemStack pickaxe) {
+		int side = layerSize + 2;
+		// Ringen ligger én blokk lenger ut enn området.
+		int radius = layerSize / 2 + 1;
+		while (scanIndex < side * side) {
+			int c = scanIndex % side;
+			int r = scanIndex / side;
+			BlockPos pos = getLayerPos(state, radius - r, radius - c);
+			// Chunken er ikke lastet: vent her og fortsett neste tick.
+			if (!level.isLoaded(pos)) {
+				return false;
+			}
+			BlockState target = level.getBlockState(pos);
+			// Waterlogged: fjern vannet, men la blokken stå. Bruker ingen fyllblokk, så det skjer med en gang.
+			if (target.hasProperty(BlockStateProperties.WATERLOGGED) && target.getValue(BlockStateProperties.WATERLOGGED)) {
+				level.setBlock(pos, target.setValue(BlockStateProperties.WATERLOGGED, false), Block.UPDATE_ALL);
+				scanIndex++;
+				continue;
+			}
+			// Ingen væske her: gratis videre.
+			if (!isFluidBlock(target)) {
+				scanIndex++;
+				continue;
+			}
+			// Væske eller "alltid-vann"-blokk: vent hvis vi ikke har fyllblokker (posisjon og fremdrift beholdes).
+			int fillerSlot = findFillerSlot();
+			if (fillerSlot < 0) {
+				return true;
+			}
+			// Samme tid som å mine én blokk, men uten fuel-kostnad og uten slitasje på pickaxen.
+			fillProgress += 1.0F / ticksPerBlock(level, pickaxe);
+			if (fillProgress >= PROGRESS_DONE) {
+				ItemStack stack = items.get(fillerSlot);
+				BlockState filler = ((BlockItem) stack.getItem()).getBlock().defaultBlockState();
+				stack.shrink(1);
+				if (stack.isEmpty()) {
+					items.set(fillerSlot, ItemStack.EMPTY);
+				}
+				// Erstatter blokken direkte, så kelp, sjøgress o.l. forsvinner uten drops.
+				level.setBlock(pos, filler, Block.UPDATE_ALL);
+				fillProgress = 0.0F;
+				scanIndex++;
+			}
+			return false;
+		}
+		return false;
+	}
+
+	/**
+	 * Væske som skal fylles: blokker med væske, men uten WATERLOGGED-property. Det gjelder vann/lava,
+	 * men også "alltid-vann"-blokker som kelp, sjøgress og boblesøyler (også fra andre mods).
+	 */
+	private static boolean isFluidBlock(BlockState state) {
+		return !state.getFluidState().isEmpty() && !state.hasProperty(BlockStateProperties.WATERLOGGED);
+	}
+
+	/** Første lager-slot med en fyllblokk som kan plasseres, eller -1 hvis det ikke finnes noen. */
+	private int findFillerSlot() {
+		for (int i = STORAGE_START; i < STORAGE_END; i++) {
+			ItemStack stack = items.get(i);
+			if (isFillerBlock(stack) && stack.getItem() instanceof BlockItem) {
+				return i;
+			}
+		}
+		return -1;
+	}
+
+	/** Totalt antall fyllblokker i lageret. */
+	private int countFillerBlocks() {
+		int count = 0;
+		for (int i = STORAGE_START; i < STORAGE_END; i++) {
+			ItemStack stack = items.get(i);
+			if (isFillerBlock(stack)) {
+				count += stack.getCount();
+			}
+		}
+		return count;
 	}
 
 	/** Blokker som quarrien ikke skal mine. */
@@ -397,9 +545,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		if (state.isAir()) {
 			return true;
 		}
-		// Rene væsker (vann, lava). Waterlogged blokker er ikke LiquidBlock, så de mines som normalt.
-		// Boblesøyler (bubble column) er egentlig bare vann, så de hoppes også over.
-		if (state.getBlock() instanceof LiquidBlock || state.is(Blocks.BUBBLE_COLUMN)) {
+		// Væske og "alltid-vann"-blokker (som skanningen ikke fikk fylt). Waterlogged blokker mines som normalt.
+		if (isFluidBlock(state)) {
 			return true;
 		}
 		// Blokker som ikke kan knuses (hardhet under 0), f.eks. bedrock og barrier.
@@ -518,12 +665,17 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	/**
 	 * Status som vises i GUI-en.
 	 * Uten pickaxe: Ready hvis det finnes fuel (lastet eller i slotten), ellers Empty.
-	 * Med pickaxe: Running (antall blokker) hvis noe er lastet, ellers Empty.
+	 * Med pickaxe: No filler hvis den venter på fyllblokker, ellers Running (antall blokker) hvis noe er lastet,
+	 * ellers Empty.
 	 */
 	public int getStatus() {
 		boolean hasLoadedFuel = getRemainingBlocks() > 0;
 		if (items.get(PICKAXE_SLOT).isEmpty()) {
 			return hasLoadedFuel || !items.get(FUEL_SLOT).isEmpty() ? STATUS_READY : STATUS_EMPTY;
+		}
+		BlockState state = getBlockState();
+		if (state.hasProperty(QuarryBlock.NEEDS_FILLER) && state.getValue(QuarryBlock.NEEDS_FILLER)) {
+			return STATUS_NO_FILLER;
 		}
 		return hasLoadedFuel ? STATUS_RUNNING : STATUS_EMPTY;
 	}
@@ -544,6 +696,11 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 
 	public static boolean isPickaxe(ItemStack stack) {
 		return stack.is(ItemTags.PICKAXES);
+	}
+
+	/** Items fra fyllblokk-taggen, som spilleren kan legge i lageret. */
+	public static boolean isFillerBlock(ItemStack stack) {
+		return !stack.isEmpty() && stack.is(FILLER_BLOCKS);
 	}
 
 	/** Samme sjekk som ovnen bruker: items med COOKING_FUEL-komponenten kan brennes. */
@@ -578,7 +735,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		return new QuarryMenu(containerId, inventory, this);
 	}
 
-	// Hva som lovlig kan ligge i hver slot. Lageret fylles bare av quarrien selv.
+	// Hva som lovlig kan ligge i hver slot. I lageret kan spilleren bare legge inn fyllblokker.
+	// (Hoppere stoppes uansett av canPlaceItemThroughFace.)
 	@Override
 	public boolean canPlaceItem(int slot, ItemStack stack) {
 		return switch (slot) {
@@ -586,7 +744,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 			case FUEL_SLOT -> isFuel(stack);
 			case SPEED_UPGRADE_SLOT -> ModItems.getSpeedLevel(stack) > 0;
 			case AREA_UPGRADE_SLOT -> ModItems.getAreaLevel(stack) > 0;
-			default -> false;
+			default -> slot >= STORAGE_START && slot < STORAGE_END && isFillerBlock(stack);
 		};
 	}
 
@@ -634,9 +792,13 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	}
 
 	// Det som står under (hopper o.l.) kan trekke fra lageret, aldri fra pickaxe/fuel.
+	// Fyllblokker bare så lenge det blir minst FILLER_RESERVE igjen etterpå (en hopper tar ett item om gangen).
 	@Override
 	public boolean canTakeItemThroughFace(int slot, ItemStack stack, Direction side) {
-		return side == Direction.DOWN && slot >= STORAGE_START && slot < STORAGE_END;
+		if (side != Direction.DOWN || slot < STORAGE_START || slot >= STORAGE_END) {
+			return false;
+		}
+		return !isFillerBlock(stack) || countFillerBlocks() - 1 >= FILLER_RESERVE;
 	}
 
 	// --- Lagring ---
@@ -650,6 +812,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		output.putInt("Layer", layer);
 		output.putInt("LayerSize", layerSize);
 		output.putFloat("MiningProgress", progress);
+		output.putInt("ScanIndex", scanIndex);
+		output.putFloat("FillProgress", fillProgress);
 		output.putBoolean("Finished", finished);
 		output.putLong("FuelStored", fuelStored);
 		ContainerHelper.saveAllItems(output, items);
@@ -669,6 +833,9 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		layerSize = input.getIntOr("LayerSize", oldDefault);
 		// Ny nøkkel (andel 0–1). Gamle lagringer med "Progress" i ticks starter blokken på nytt.
 		progress = input.getFloatOr("MiningProgress", 0.0F);
+		// Gamle lagringer uten ScanIndex som er midt i et lag: det laget skannes ikke, bare de neste.
+		scanIndex = input.getIntOr("ScanIndex", column > 0 || row > 0 ? SCAN_DONE : 0);
+		fillProgress = input.getFloatOr("FillProgress", 0.0F);
 		finished = input.getBooleanOr("Finished", false);
 		fuelStored = input.getLongOr("FuelStored", 0L);
 		items = NonNullList.withSize(CONTAINER_SIZE, ItemStack.EMPTY);

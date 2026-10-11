@@ -3,13 +3,14 @@
 	"id": "quarrymod",
 	"version": "${version}",
 	"name": "Quarry Mod",
-	"description": "A simple 15x15 quarry that mines layer by layer down to the bottom of the world. Work in progress.",
+	"description": "A simple 15x15 quarry that mines layer by layer down to the bottom of the world. Beta.",
 	"authors": [
 		"Seigmannen"
 	],
 	"contact": {
-		"homepage": "https://fabricmc.net/",
-		"sources": "https://github.com/FabricMC/fabric-example-mod"
+		"homepage": "https://github.com/Seigmannen/QuarryMod",
+		"sources": "https://github.com/Seigmannen/QuarryMod",
+		"issues": "https://github.com/Seigmannen/QuarryMod/issues"
 	},
 	"license": "MIT",
 	"icon": "assets/quarrymod/icon.png",

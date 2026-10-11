@@ -36,20 +36,23 @@ public class QuarryBlock extends HorizontalDirectionalBlock implements EntityBlo
 	public static final BooleanProperty POWERED = BlockStateProperties.POWERED;
 	/** true når quarrien har mint helt ned til bunnen av verden. Brukes til å vise "ferdig"-fronten. */
 	public static final BooleanProperty FINISHED = BooleanProperty.create("finished");
+	/** true når quarrien står og venter på fyllblokker. Brukes til å vise den blå fronten. */
+	public static final BooleanProperty NEEDS_FILLER = BooleanProperty.create("needs_filler");
 
 	public QuarryBlock(Properties properties) {
 		super(properties);
-		// Standardtilstanden: fronten vender mot nord, ingen strøm, og ikke ferdig.
+		// Standardtilstanden: fronten vender mot nord, ingen strøm, ikke ferdig og venter ikke på fyllblokker.
 		this.registerDefaultState(this.stateDefinition.any()
 				.setValue(FACING, Direction.NORTH)
 				.setValue(POWERED, false)
-				.setValue(FINISHED, false));
+				.setValue(FINISHED, false)
+				.setValue(NEEDS_FILLER, false));
 	}
 
 	// Forteller Minecraft hvilke properties blokken har. Uten denne finnes de ikke på blokken.
 	@Override
 	protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
-		builder.add(FACING, POWERED, FINISHED);
+		builder.add(FACING, POWERED, FINISHED, NEEDS_FILLER);
 	}
 
 	// Kalles når spilleren plasserer blokken. Spilleren ser i én retning,

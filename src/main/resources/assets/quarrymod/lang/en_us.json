@@ -19,5 +19,8 @@
   "gui.quarrymod.filter.whitelist_empty": "Whitelist empty",
   "gui.quarrymod.status.empty": "Empty",
   "gui.quarrymod.status.ready": "Ready",
-  "gui.quarrymod.status.blocks": "blocks"
+  "gui.quarrymod.status.blocks": "blocks",
+  "gui.quarrymod.status.no_filler_1": "No filler",
+  "gui.quarrymod.status.no_filler_2": "",
+  "tag.item.quarrymod.filler_blocks": "Filler Blocks"
 }

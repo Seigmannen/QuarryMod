@@ -1,7 +1,7 @@
 # Quarry Mod
 
-> **⚠️ WORK IN PROGRESS**
-> This mod is still under development. Features may change, and things may be unstable or break between versions. Back up your worlds before using it.
+> **⚠️ BETA**
+> This is a beta release. Expect bugs, and back up your worlds before using it.
 
 A simple quarry for Minecraft 26.3 (Fabric), inspired by Simple Quarries Plus.
 
@@ -10,12 +10,16 @@ A simple quarry for Minecraft 26.3 (Fabric), inspired by Simple Quarries Plus.
 - Mines an area centered on the quarry (15x15 by default, larger with area upgrades), layer by layer, starting from the layer below it and going down to the bottom of the world
 - Mines in a fixed grid order starting at the back-left corner (relative to the front of the quarry)
 - Mining speed depends on the inserted pickaxe (10x slower than a player mining stone, e.g. about 3 seconds per block with a diamond pickaxe). All blocks take the same time.
-- Skips air, liquids and unbreakable blocks
+- Skips air and unbreakable blocks
+- Fills water and lava with filler blocks from storage (cobblestone, stone, deepslate, dirt, netherrack and similar). The player can add filler blocks to the storage.
+- Builds a wall around the area: the ring just outside the mining area is filled too and never mined, so lakes and oceans stay out
+- Stops with a blue light when it runs out of filler blocks, and continues automatically when more are added
+- A hopper below always leaves at least 64 filler blocks in storage
 - Mined items go into internal storage; when storage is full, items are ejected on top (works well with water collection systems)
 - Container contents (e.g. chests) drop on the ground like in vanilla
 - Remembers its progress when the chunk unloads or the world is reloaded
 - Redstone control: a redstone signal pauses it
-- Status light on the front: green = running, red = paused, off = finished
+- Status light on the front: green = running, red = paused, blue = needs filler blocks, off = finished
 - Needs both a pickaxe and fuel to work
 - Uses the pickaxe you insert: tool speed, Efficiency, Silk Touch, Fortune and Unbreaking work like vanilla, and the pickaxe takes durability damage
 - Runs on furnace fuel: one smelt in a furnace = 12 blocks (coal = 96, lava bucket = 1200); empty buckets go to storage
@@ -68,7 +72,7 @@ X U X
 - [x] Upgrades:
   - [x] Speed upgrades (mine faster)
   - [x] Area upgrades (larger mining area)
-- [ ] Liquid handling: before each layer, the quarry scans the layer and the ring just outside the mining area for liquids (including waterlogged blocks) and replaces them with common filler blocks from its storage (cobblestone, cobbled deepslate, dirt, gravel, netherrack, stone, deepslate). The outer ring is never mined, so it forms a wall against lakes and oceans. If no filler blocks are available, this step is skipped.
+- [x] Liquid handling: before each layer, the quarry scans the layer and the ring just outside the mining area. Water and lava are replaced with filler blocks from its storage (tag `quarrymod:filler_blocks`: cobblestone, cobbled deepslate, stone, deepslate, dirt, netherrack, granite, diorite, andesite, tuff), and waterlogged blocks are drained. The outer ring is never mined, so it forms a wall against lakes and oceans. Players can put filler blocks into storage. Each fill takes as long as mining one block (no fuel cost, no pickaxe wear). Blocks that always contain water (kelp, seagrass, bubble columns, also from other mods) are replaced without drops. If it runs out of filler blocks, it stops and waits (blue front, "No filler" in the GUI) until more are added. A hopper below always leaves at least 64 filler blocks in storage.
 
 ## Requirements
 
