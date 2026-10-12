@@ -12,6 +12,7 @@ import net.minecraft.core.NonNullList;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
@@ -29,6 +30,7 @@ import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.ItemStackTemplate;
+import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.CookingFuel;
 import net.minecraft.world.item.component.Tool;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
@@ -90,6 +92,14 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	/** scanIndex-verdi som betyr "laget er ferdig skannet" (brukes for gamle lagringer midt i et lag). */
 	private static final int SCAN_DONE = Integer.MAX_VALUE;
 
+	// --- Mine (Almost) Everything ---
+	/**
+	 * Taggen fra Mine (Almost) Everything (bedrock, reinforced deepslate). Bare en tagg, ingen avhengighet:
+	 * uten den moden er taggen tom, og quarrien hopper over uknuselige blokker som før.
+	 */
+	public static final TagKey<Block> NETHERITE_MINEABLE =
+			TagKey.create(Registries.BLOCK, Identifier.fromNamespaceAndPath("mineeverything", "netherite_mineable"));
+
 	// --- Fuel ---
 	/** Én smelting i en ovn (200 ticks brenntid) = 12 blokker, så hver tick brenntid gir 12 poeng. */
 	private static final int POINTS_PER_BURN_TICK = 12;
@@ -135,7 +145,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	// Antall blokker fuelen rekker. ContainerData sendes som 16-bit (short), så tallet deles i to halvdeler.
 	public static final int DATA_BLOCKS_LOW = 2;
 	public static final int DATA_BLOCKS_HIGH = 3;
-	public static final int DATA_COUNT = 4;
+	public static final int DATA_MINE_BOTTOM_LAYER = 4; // 1 = på, 0 = av
+	public static final int DATA_COUNT = 5;
 
 	private NonNullList<ItemStack> items = NonNullList.withSize(CONTAINER_SIZE, ItemStack.EMPTY);
 
@@ -148,6 +159,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		}
 	};
 	private int filterMode = FILTER_DISABLED;
+	/** Om quarrien også skal mine verdens laveste lag (level.getMinY()). Av som standard. */
+	private boolean mineBottomLayer = false;
 
 	/** Tallene GUI-en trenger. Menyen sender dem automatisk til klienten når de endres. */
 	private final ContainerData data = new ContainerData() {
@@ -158,6 +171,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 				case DATA_FILTER_MODE -> filterMode;
 				case DATA_BLOCKS_LOW -> getRemainingBlocks() & 0xFFFF;
 				case DATA_BLOCKS_HIGH -> getRemainingBlocks() >>> 16;
+				case DATA_MINE_BOTTOM_LAYER -> mineBottomLayer ? 1 : 0;
 				default -> 0;
 			};
 		}
@@ -166,6 +180,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		public void set(int index, int value) {
 			if (index == DATA_FILTER_MODE) {
 				filterMode = value;
+			} else if (index == DATA_MINE_BOTTOM_LAYER) {
+				mineBottomLayer = value != 0;
 			}
 		}
 
@@ -213,6 +229,13 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	/** Selve tikken. Returnerer true hvis quarrien står og venter på fyllblokker. */
 	private static boolean tickQuarry(ServerLevel level, BlockPos pos, BlockState state, QuarryBlockEntity quarry) {
 		if (quarry.finished) {
+			// "Mine bottom layer" ble slått på etter at quarrien ble ferdig: fortsett med det nederste laget neste tick.
+			if (quarry.getCurrentLayerY() >= quarry.getLowestY(level)) {
+				quarry.finished = false;
+				quarry.setChanged();
+				level.setBlock(pos, state.setValue(QuarryBlock.FINISHED, false), Block.UPDATE_CLIENTS);
+				return false;
+			}
 			// Sørg for at blokken viser "ferdig"-fronten (f.eks. for quarries som ble ferdige før FINISHED fantes).
 			markFinished(level, pos, state);
 			return false;
@@ -243,8 +266,9 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 			}
 			BlockPos target = quarry.getTargetPos(state);
 
-			// Har vi gått under bunnen av verden? Da er vi ferdige.
-			if (target.getY() < level.getMinY()) {
+			// Har vi gått under det laveste laget vi skal mine? Da er vi ferdige.
+			// (Slås "Mine bottom layer" av midt i det nederste laget, stopper vi også her.)
+			if (target.getY() < quarry.getLowestY(level)) {
 				quarry.finished = true;
 				quarry.progress = 0.0F;
 				quarry.setChanged();
@@ -271,7 +295,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 			}
 
 			BlockState targetState = level.getBlockState(target);
-			if (quarry.shouldSkip(targetState, level, target)) {
+			if (quarry.shouldSkip(targetState, level, target, pickaxe)) {
 				// Hopp over gratis (koster ingen tid) og gå videre til neste posisjon.
 				quarry.advance();
 				skipped++;
@@ -422,6 +446,16 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 				.relative(left, leftOffset);
 	}
 
+	/** Y-nivået til laget vi er på (uavhengig av områdets størrelse). */
+	private int getCurrentLayerY() {
+		return this.worldPosition.getY() - 1 - layer;
+	}
+
+	/** Det laveste laget quarrien skal mine: verdens bunn hvis "Mine bottom layer" er på, ellers laget over. */
+	private int getLowestY(Level level) {
+		return mineBottomLayer ? level.getMinY() : level.getMinY() + 1;
+	}
+
 	/**
 	 * Går til neste rute: venstre mot høyre, rad for rad mot fronten, og deretter ett lag ned.
 	 */
@@ -536,7 +570,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	}
 
 	/** Blokker som quarrien ikke skal mine. */
-	private boolean shouldSkip(BlockState state, Level level, BlockPos pos) {
+	private boolean shouldSkip(BlockState state, Level level, BlockPos pos, ItemStack pickaxe) {
 		// En hopper rett under quarrien (H8 på første lag) får stå, så den kan tømme lageret.
 		if (pos.equals(this.worldPosition.below()) && state.getBlock() instanceof HopperBlock) {
 			return true;
@@ -550,7 +584,13 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 			return true;
 		}
 		// Blokker som ikke kan knuses (hardhet under 0), f.eks. bedrock og barrier.
-		return state.getDestroySpeed(level, pos) < 0;
+		// Unntak: blokker i taggen til Mine (Almost) Everything, med samme krav som for en spiller (netherite pickaxe).
+		return state.getDestroySpeed(level, pos) < 0 && !canMineUnbreakable(state, pickaxe);
+	}
+
+	/** Samme regel som NetheriteMining.canMine i Mine (Almost) Everything: blokken i taggen + netherite pickaxe. */
+	private static boolean canMineUnbreakable(BlockState state, ItemStack pickaxe) {
+		return state.is(NETHERITE_MINEABLE) && pickaxe.is(Items.NETHERITE_PICKAXE);
 	}
 
 	/** Knuser blokken. Dropsene går inn i lageret, og det som ikke får plass, spyttes ut på toppen. */
@@ -560,7 +600,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		// Hardheten må leses før blokken fjernes (brukes til slitasjen under).
 		float hardness = targetState.getDestroySpeed(level, target);
 
-		// Dropsene regnes ut med selve pickaxen, så Silk Touch og Fortune virker.
+		// Dropsene regnes ut med selve pickaxen, så Silk Touch og Fortune virker. Block entityen sendes med,
+		// så en spawner beholder mob-typen når loot table-en kopierer data fra den (Mine (Almost) Everything).
 		// Som i vanilla: blokker som krever riktig verktøy (f.eks. diamond ore med steinpickaxe) gir ingenting.
 		List<ItemStack> drops = !targetState.requiresCorrectToolForDrops() || pickaxe.isCorrectToolForDrops(targetState)
 				? Block.getDrops(targetState, level, target, targetBlockEntity, null, pickaxe)
@@ -683,6 +724,12 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	/** Disabled -> Whitelist -> Blacklist -> Disabled ... */
 	public void cycleFilterMode() {
 		filterMode = (filterMode + 1) % FILTER_MODE_COUNT;
+		setChanged();
+	}
+
+	/** Knappen "Mine bottom layer". Selve stopp/fortsett skjer i tikken. */
+	public void toggleMineBottomLayer() {
+		mineBottomLayer = !mineBottomLayer;
 		setChanged();
 	}
 
@@ -819,6 +866,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		ContainerHelper.saveAllItems(output, items);
 		ContainerHelper.saveAllItems(output.child("Filter"), filter.getItems());
 		output.putInt("FilterMode", filterMode);
+		output.putBoolean("MineBottomLayer", mineBottomLayer);
 	}
 
 	// Leser dataene tilbake når chunken lastes inn igjen.
@@ -843,5 +891,6 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		filter.getItems().replaceAll(stack -> ItemStack.EMPTY);
 		ContainerHelper.loadAllItems(input.childOrEmpty("Filter"), filter.getItems());
 		filterMode = Math.floorMod(input.getIntOr("FilterMode", FILTER_DISABLED), FILTER_MODE_COUNT);
+		mineBottomLayer = input.getBooleanOr("MineBottomLayer", false);
 	}
 }

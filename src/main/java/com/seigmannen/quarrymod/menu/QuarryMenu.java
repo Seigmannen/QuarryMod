@@ -36,6 +36,8 @@ public class QuarryMenu extends AbstractContainerMenu {
 
 	/** Knapp-ID som sendes med clickMenuButton når filterknappen trykkes. */
 	public static final int BUTTON_CYCLE_FILTER = 0;
+	/** Knapp-ID for "Mine bottom layer" (av/på). */
+	public static final int BUTTON_TOGGLE_BOTTOM_LAYER = 1;
 
 	private final Container container;
 	private final ContainerData data;
@@ -110,6 +112,10 @@ public class QuarryMenu extends AbstractContainerMenu {
 		return data.get(QuarryBlockEntity.DATA_FILTER_MODE);
 	}
 
+	public boolean isMineBottomLayer() {
+		return data.get(QuarryBlockEntity.DATA_MINE_BOTTOM_LAYER) != 0;
+	}
+
 	/** Om alle filter-slotsene er tomme. Virker på klienten også, siden slotsene synkroniseres. */
 	public boolean isFilterEmpty() {
 		for (int i = FILTER_START; i < FILTER_END; i++) {
@@ -120,12 +126,18 @@ public class QuarryMenu extends AbstractContainerMenu {
 		return true;
 	}
 
-	// Filterknappen: klienten sender knapp-ID-en, serveren bytter modus.
+	// Knappene: klienten sender knapp-ID-en, serveren endrer innstillingen.
 	@Override
 	public boolean clickMenuButton(Player player, int id) {
 		if (id == BUTTON_CYCLE_FILTER) {
 			if (quarry != null) {
 				quarry.cycleFilterMode();
+			}
+			return true;
+		}
+		if (id == BUTTON_TOGGLE_BOTTOM_LAYER) {
+			if (quarry != null) {
+				quarry.toggleMineBottomLayer();
 			}
 			return true;
 		}

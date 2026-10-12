@@ -7,10 +7,11 @@ A simple quarry for Minecraft 26.3 (Fabric), inspired by Simple Quarries Plus.
 
 ## Features
 
-- Mines an area centered on the quarry (15x15 by default, larger with area upgrades), layer by layer, starting from the layer below it and going down to the bottom of the world
+- Mines an area centered on the quarry (15x15 by default, larger with area upgrades), layer by layer, starting from the layer below it and going down to the layer just above the bottom of the world (the bottom layer is optional, see below)
 - Mines in a fixed grid order starting at the back-left corner (relative to the front of the quarry)
 - Mining speed depends on the inserted pickaxe (10x slower than a player mining stone, e.g. about 3 seconds per block with a diamond pickaxe). All blocks take the same time.
-- Skips air and unbreakable blocks
+- Skips air and unbreakable blocks (except bedrock and reinforced deepslate with Mine (Almost) Everything, see Compatibility)
+- Mine bottom layer toggle (button with a bedrock icon in the GUI, off by default): lets the quarry also mine the lowest layer of the world. In the Overworld and the Nether this layer is bedrock, so the toggle only has an effect there when Mine (Almost) Everything is installed.
 - Fills water and lava with filler blocks from storage (cobblestone, stone, deepslate, dirt, netherrack and similar). The player can add filler blocks to the storage.
 - Builds a wall around the area: the ring just outside the mining area is filled too and never mined, so lakes and oceans stay out
 - Stops with a blue light when it runs out of filler blocks, and continues automatically when more are added
@@ -73,6 +74,11 @@ X U X
   - [x] Speed upgrades (mine faster)
   - [x] Area upgrades (larger mining area)
 - [x] Liquid handling: before each layer, the quarry scans the layer and the ring just outside the mining area. Water and lava are replaced with filler blocks from its storage (tag `quarrymod:filler_blocks`: cobblestone, cobbled deepslate, stone, deepslate, dirt, netherrack, granite, diorite, andesite, tuff), and waterlogged blocks are drained. The outer ring is never mined, so it forms a wall against lakes and oceans. Players can put filler blocks into storage. Each fill takes as long as mining one block (no fuel cost, no pickaxe wear). Blocks that always contain water (kelp, seagrass, bubble columns, also from other mods) are replaced without drops. If it runs out of filler blocks, it stops and waits (blue front, "No filler" in the GUI) until more are added. A hopper below always leaves at least 64 filler blocks in storage.
+
+## Compatibility
+
+- **Mine (Almost) Everything:** with this mod installed, the quarry can mine bedrock and reinforced deepslate with a netherite pickaxe, and budding amethyst and spawners (which keep their mob type) with Silk Touch on an iron pickaxe or better. Without it, the quarry works as before.
+- **Bottom layer:** by default, the quarry does not mine the bottom layer of the world. It can be turned on per quarry with the "Mine bottom layer" button (bedrock icon) in the quarry GUI. Careful: this can open a hole into the void.
 
 ## Requirements
 

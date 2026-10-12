@@ -24,6 +24,13 @@ dependencies {
 	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
 
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+	// Bare for testing i runClient: Mine (Almost) Everything fra naboprosjektet, hvis jar-filen er bygd.
+	// localRuntime er kun med på runtime-classpathen i dev (ikke kompilering, ikke publisering, ikke i jar-filen).
+	// Kjør uten den med: gradlew runClient -PnoMineEverything
+	if (!project.hasProperty("noMineEverything")) {
+		localRuntime fileTree(dir: "../Mine (Almost) Everything/build/libs", include: "mineeverything-*.jar", exclude: "*-sources.jar")
+	}
 }
 
 processResources {

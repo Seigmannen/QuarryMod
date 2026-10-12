@@ -4,6 +4,7 @@ import com.seigmannen.quarrymod.QuarryMod;
 import com.seigmannen.quarrymod.block.entity.QuarryBlockEntity;
 import com.seigmannen.quarrymod.item.ModItems;
 import com.seigmannen.quarrymod.menu.QuarryMenu;
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -15,6 +16,9 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * GUI-en til quarrien (bare på klienten). Tegner bakgrunnen, tittel, status og filterknappen.
@@ -35,6 +39,15 @@ public class QuarryScreen extends AbstractContainerScreen<QuarryMenu> {
 	private static final int FILTER_BUTTON_Y = 100;
 	private static final int FILTER_BUTTON_WIDTH = 90;
 	private static final int WHITELIST_WARNING_Y = 124;
+	// "Mine bottom layer"-knappen (20x20) mellom area-slotten (slutter på x = 73) og filteret (starter på x = 115),
+	// under advarselen (y = 124–133). Grønn ramme når den er på.
+	private static final int BOTTOM_LAYER_BUTTON_X = 80;
+	private static final int BOTTOM_LAYER_BUTTON_Y = 135;
+	private static final int BOTTOM_LAYER_BUTTON_SIZE = 20;
+	private static final int BOTTOM_LAYER_ON_COLOR = 0xFF55FF55;
+	private static final ItemStack BOTTOM_LAYER_ICON = new ItemStack(Items.BEDROCK);
+	// Om Mine (Almost) Everything er installert (endres ikke mens spillet kjører).
+	private static final boolean MINE_EVERYTHING_LOADED = FabricLoader.getInstance().isModLoaded("mineeverything");
 	private static final ItemStack PICKAXE_ICON = new ItemStack(Items.IRON_PICKAXE);
 	private static final ItemStack FUEL_ICON = new ItemStack(Items.COAL);
 	// ModItems er alltid registrert før klienten åpner en GUI.
@@ -42,6 +55,7 @@ public class QuarryScreen extends AbstractContainerScreen<QuarryMenu> {
 	private static final ItemStack AREA_UPGRADE_ICON = new ItemStack(ModItems.AREA_UPGRADES[0]);
 
 	private Button filterButton;
+	private Button bottomLayerButton;
 
 	public QuarryScreen(QuarryMenu menu, Inventory inventory, Component title) {
 		super(menu, inventory, title, 176, 248);
@@ -58,6 +72,13 @@ public class QuarryScreen extends AbstractContainerScreen<QuarryMenu> {
 				this.minecraft.gameMode.handleInventoryButtonClick(this.menu.containerId, QuarryMenu.BUTTON_CYCLE_FILTER);
 			}
 		}).bounds(this.leftPos + FILTER_BUTTON_X, this.topPos + FILTER_BUTTON_Y, FILTER_BUTTON_WIDTH, 20).build());
+		// Uten tekst: bedrock-ikonet og rammen tegnes i extractLabels.
+		this.bottomLayerButton = this.addRenderableWidget(Button.builder(Component.empty(), button -> {
+			if (this.minecraft.gameMode != null) {
+				this.minecraft.gameMode.handleInventoryButtonClick(this.menu.containerId, QuarryMenu.BUTTON_TOGGLE_BOTTOM_LAYER);
+			}
+		}).bounds(this.leftPos + BOTTOM_LAYER_BUTTON_X, this.topPos + BOTTOM_LAYER_BUTTON_Y,
+				BOTTOM_LAYER_BUTTON_SIZE, BOTTOM_LAYER_BUTTON_SIZE).build());
 	}
 
 	// Oppdater knappeteksten når serveren har sendt ny modus.
@@ -135,6 +156,19 @@ public class QuarryScreen extends AbstractContainerScreen<QuarryMenu> {
 	@Override
 	protected void extractTooltip(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		super.extractTooltip(graphics, mouseX, mouseY);
+		// "Mine bottom layer: On/Off" med en grå advarsel under.
+		if (this.bottomLayerButton.isHovered()) {
+			String state = this.menu.isMineBottomLayer() ? "on" : "off";
+			List<Component> lines = new ArrayList<>(List.of(
+					Component.translatable("gui.quarrymod.bottom_layer." + state),
+					Component.translatable("gui.quarrymod.bottom_layer.warning").withStyle(ChatFormatting.GRAY)));
+			// Uten Mine (Almost) Everything hoppes bedrock over, så si fra om det.
+			if (!MINE_EVERYTHING_LOADED) {
+				lines.add(Component.translatable("gui.quarrymod.bottom_layer.requires_mine_everything").withStyle(ChatFormatting.GRAY));
+			}
+			graphics.setComponentTooltipForNextFrame(this.font, lines, mouseX, mouseY);
+			return;
+		}
 		if (this.hoveredSlot == null || this.hoveredSlot.hasItem() || !this.menu.getCarried().isEmpty()) {
 			return;
 		}
@@ -170,6 +204,12 @@ public class QuarryScreen extends AbstractContainerScreen<QuarryMenu> {
 			Component warning = Component.translatable("gui.quarrymod.filter.whitelist_empty").withStyle(ChatFormatting.YELLOW);
 			int x = FILTER_BUTTON_X + FILTER_BUTTON_WIDTH / 2 - this.font.width(warning) / 2;
 			graphics.text(this.font, warning, x, WHITELIST_WARNING_Y, 0xFFFFFFFF, true);
+		}
+		// Bedrock-ikon på "Mine bottom layer"-knappen, og grønn ramme når den er på. Nytt lag, så det havner over knappen.
+		graphics.nextStratum();
+		graphics.item(BOTTOM_LAYER_ICON, BOTTOM_LAYER_BUTTON_X + 2, BOTTOM_LAYER_BUTTON_Y + 2);
+		if (this.menu.isMineBottomLayer()) {
+			graphics.outline(BOTTOM_LAYER_BUTTON_X, BOTTOM_LAYER_BUTTON_Y, BOTTOM_LAYER_BUTTON_SIZE, BOTTOM_LAYER_BUTTON_SIZE, BOTTOM_LAYER_ON_COLOR);
 		}
 	}
 }
