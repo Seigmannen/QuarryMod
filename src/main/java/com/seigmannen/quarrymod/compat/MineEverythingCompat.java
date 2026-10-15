@@ -23,7 +23,13 @@ public final class MineEverythingCompat {
 	/** Om Mine (Almost) Everything er installert (endres ikke mens spillet kjører). */
 	private static final boolean LOADED = FabricLoader.getInstance().isModLoaded(MOD_ID);
 
-	/** Taggen fra Mine (Almost) Everything (bedrock, reinforced deepslate). Bare en tagg, så den er trygg uten moden. */
+	/**
+	 * Om den installerte versjonen har MineEverythingApi.canMineUnbreakable (fra 1.1.1). Settes til false første gang
+	 * kallet feiler med NoSuchMethodError, og deretter brukes den gamle logikken under.
+	 */
+	private static volatile boolean hasCanMineUnbreakable = true;
+
+	/** Bare for eldre versjoner: taggen fra Mine (Almost) Everything (bedrock, reinforced deepslate). Trygg uten moden. */
 	private static final TagKey<Block> NETHERITE_MINEABLE =
 			TagKey.create(Registries.BLOCK, Identifier.fromNamespaceAndPath(MOD_ID, "netherite_mineable"));
 
@@ -31,12 +37,23 @@ public final class MineEverythingCompat {
 	}
 
 	/**
-	 * Om quarrien kan mine en blokk som ikke kan knuses i vanilla (hardhet under 0, dvs. bedrock). Samme krav som
-	 * for en spiller: blokken er i taggen, pickaxen er netherite, og /mae-innstillingene tillater den her
-	 * (for bedrock på y = -64 i Overworld også "bottom_layer"). Alltid false uten moden.
+	 * Om quarrien kan mine en blokk som ikke kan knuses i vanilla (hardhet under 0, dvs. bedrock). Samme regler som
+	 * for en spiller, hentet fra Mine (Almost) Everything (blokk, pickaxe og /mae-innstillingene). Alltid false uten moden.
 	 */
 	public static boolean canMineUnbreakable(Level level, BlockState state, BlockPos pos, ItemStack pickaxe) {
-		return LOADED && state.is(NETHERITE_MINEABLE) && pickaxe.is(Items.NETHERITE_PICKAXE)
+		if (!LOADED) {
+			return false;
+		}
+		if (hasCanMineUnbreakable) {
+			try {
+				return MineEverythingApi.canMineUnbreakable(level, state, pos, pickaxe);
+			} catch (NoSuchMethodError e) {
+				// Eldre Mine (Almost) Everything uten metoden: bruk den gamle logikken fra nå av.
+				hasCanMineUnbreakable = false;
+			}
+		}
+		// Gammel logikk: blokken er i taggen, pickaxen er netherite, og /mae tillater den her.
+		return state.is(NETHERITE_MINEABLE) && pickaxe.is(Items.NETHERITE_PICKAXE)
 				&& MineEverythingApi.isAllowed(level, state, pos);
 	}
 }
