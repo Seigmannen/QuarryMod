@@ -3,7 +3,7 @@
 	"id": "quarrymod",
 	"version": "${version}",
 	"name": "Quarry Mod",
-	"description": "A simple 15x15 quarry that mines layer by layer down to the bottom of the world. Beta.",
+	"description": "A simple 15x15 quarry that mines layer by layer down to the bottom of the world.",
 	"authors": [
 		"Seigmannen"
 	],

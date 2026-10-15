@@ -17,6 +17,13 @@ loom {
 			sourceSet sourceSets.client
 		}
 	}
+
+	runs {
+		client {
+			// Fast navn på testklienten, så den er operatør på testserveren (offline-UUID, online-mode=false).
+			programArgs "--username", "Moltemyhr"
+		}
+	}
 }
 
 dependencies {
@@ -25,11 +32,12 @@ dependencies {
 
 	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 
-	// Bare for testing i runClient: Mine (Almost) Everything fra naboprosjektet, hvis jar-filen er bygd.
-	// localRuntime er kun med på runtime-classpathen i dev (ikke kompilering, ikke publisering, ikke i jar-filen).
-	// Kjør uten den med: gradlew runClient -PnoMineEverything
+	// Mine (Almost) Everything (valgfri, se compat/MineEverythingCompat). Jar-filen ligger i libs/, så prosjektet bygger overalt.
+	// compileOnly: bare for å kompilere mot API-et. Kommer ikke med i jar-filen eller publiseringen (ingen include).
+	compileOnly files("libs/mineeverything-1.1.0.jar")
+	// localRuntime: bare med i runClient/runServer i dev. Kjør uten den med: gradlew runClient -PnoMineEverything
 	if (!project.hasProperty("noMineEverything")) {
-		localRuntime fileTree(dir: "../Mine (Almost) Everything/build/libs", include: "mineeverything-*.jar", exclude: "*-sources.jar")
+		localRuntime files("libs/mineeverything-1.1.0.jar")
 	}
 }
 
