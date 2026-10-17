@@ -69,9 +69,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	 * Indeks = speed-oppgraderingens nivå (0 = ingen, 1–5 = I–V). Høyere = tregere.
 	 */
 	private static final int[] SPEED_FACTORS = {10, 7, 5, 3, 2, 1};
-	/** Speed V gir i tillegg samme effekt som Haste II: miningSpeed * 1,4. */
-	private static final float HASTE_MULTIPLIER = 1.4F;
-	private static final int HASTE_SPEED_LEVEL = 5;
+	/** Speed V gir alltid instant mining: 1 tick per blokk, uansett pickaxe og Efficiency. */
+	private static final int INSTANT_SPEED_LEVEL = 5;
 
 	/** Stein (hardhet 1,5). Alle blokker mines med samme fart som denne. */
 	private static final float REFERENCE_HARDNESS = 1.5F;
@@ -301,13 +300,15 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 
 	/**
 	 * Hvor mange ticks én blokk tar med denne pickaxen og speed-oppgraderingen som står i nå:
-	 * ceil(30 * 1,5 * fartsfaktor / (miningSpeed * hasteFaktor)), minst 1. (Vanilla: 30 * hardhet / fart.)
+	 * ceil(30 * 1,5 * fartsfaktor / miningSpeed), minst 1. (Vanilla: 30 * hardhet / fart.) Speed V gir alltid 1.
 	 * Regnes ut hver tick, så et bytte av oppgradering gjelder med en gang, mens fremdriften (andel) beholdes.
 	 */
 	private int ticksPerBlock(ServerLevel level, ItemStack pickaxe) {
 		int speedLevel = ModItems.getSpeedLevel(items.get(SPEED_UPGRADE_SLOT));
+		if (speedLevel >= INSTANT_SPEED_LEVEL) {
+			return 1;
+		}
 		int speedFactor = SPEED_FACTORS[speedLevel];
-		float hasteFactor = speedLevel >= HASTE_SPEED_LEVEL ? HASTE_MULTIPLIER : 1.0F;
 
 		// Farten på stein hentes fra itemets Tool-komponent, så det virker for alle pickaxer (også fra andre mods).
 		Tool tool = pickaxe.get(DataComponents.TOOL);
@@ -325,12 +326,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 			}
 		}
 
-		float totalSpeed = miningSpeed * hasteFactor;
-		// Insta-mining som i vanilla: med fartsfaktor 1 og fart >= 45 (30 * 1,5) knuses blokken på 1 tick.
-		if (speedFactor == 1 && totalSpeed >= 30.0F * REFERENCE_HARDNESS) {
-			return 1;
-		}
-		int ticks = Mth.ceil(30.0F * REFERENCE_HARDNESS * speedFactor / totalSpeed);
+		int ticks = Mth.ceil(30.0F * REFERENCE_HARDNESS * speedFactor / miningSpeed);
 		return Math.max(1, ticks);
 	}
 

@@ -23,7 +23,7 @@ A simple quarry for Minecraft 26.3 (Fabric), inspired by Simple Quarries Plus.
 - 24-slot internal storage; overflow is ejected on top
 - Hopper support: pickaxes from the back, fuel from the sides, storage can be pulled from below
 - Item filter (whitelist / blacklist / disabled) that works on the drops; filtered-out items are destroyed. Silk Touch drops are filtered as what they actually drop (e.g. stone, not cobblestone).
-- Speed upgrades I–V: reduce the slowdown factor step by step (10 → 7 → 5 → 3 → 2 → 1). Speed V also gives a Haste II effect, so Efficiency V on diamond, netherite or gold mines instantly. Fuel use does not change: the same amount of fuel per block mined.
+- Speed upgrades I–IV: reduce the slowdown factor step by step (10 → 7 → 5 → 3 → 2). Speed V always mines 1 block per tick (instant mining), regardless of pickaxe and enchantments. Fuel use does not change: the same amount of fuel per block mined.
 - Area upgrades I–V: 25x25, 35x35, 45x45, 55x55 and 65x65. A new size takes effect from the next layer.
 - Upgrade recipes: the previous tier in the center with 4 materials around it in a plus shape (iron, gold, emerald, diamond, netherite). Tier I uses a redstone block (speed) or an ender pearl (area) in the center.
 
