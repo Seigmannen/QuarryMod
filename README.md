@@ -8,10 +8,10 @@ A simple quarry for Minecraft 26.3 (Fabric), inspired by Simple Quarries Plus.
 - Mines in a fixed grid order starting at the back-left corner (relative to the front of the quarry)
 - Mining speed depends on the inserted pickaxe (10x slower than a player mining stone, e.g. about 3 seconds per block with a diamond pickaxe). All blocks take the same time.
 - Skips air, liquids, a hopper directly below the quarry, and blocks that are unbreakable in vanilla like bedrock (bedrock can be mined with Mine (Almost) Everything, see Compatibility)
-- Liquid handling: before each layer, the quarry scans the layer and the ring just outside the mining area. Water and lava are replaced with filler blocks from storage (tag `quarrymod:filler_blocks`: cobblestone, cobbled deepslate, stone, deepslate, dirt, netherrack, granite, diorite, andesite, tuff), and waterlogged blocks are drained. Each fill takes as long as mining one block (no fuel cost, no pickaxe wear). Blocks that always contain water (kelp, seagrass, bubble columns, also from other mods) are replaced without drops. The player can add filler blocks to the storage.
+- Liquid handling: before each layer, the quarry scans the layer and the ring just outside the mining area. Water and lava are replaced with filler blocks (tag `quarrymod:filler_blocks`: cobblestone, cobbled deepslate, stone, deepslate, dirt, netherrack, granite, diorite, andesite, tuff), and waterlogged blocks are drained. Each fill takes as long as mining one block (no fuel cost, no pickaxe wear). Blocks that always contain water (kelp, seagrass, bubble columns, also from other mods) are replaced without drops.
+- Filler storage: a separate internal store for up to 4608 filler blocks (mixed types are fine). Mined filler blocks go here first, before the filter (so they are kept even if they are on the blacklist); the rest goes through the filter and into normal storage as usual. You can also fill it from the filler slot in the GUI (shift-click works) or with a hopper on the right side. Hover over the filler slot to see how many it holds. Fills use the filler storage first, then filler blocks in normal storage. Hoppers cannot pull from it, and when the quarry is broken, the filler storage stays inside the quarry item (like a shulker box) and comes back when you place it again.
 - Builds a wall around the area: the ring just outside the mining area is filled too and never mined, so lakes and oceans stay out
 - Stops with a blue light when it runs out of filler blocks, and continues automatically when more are added
-- A hopper below always leaves at least 64 filler blocks in storage
 - Mined items go into internal storage; when storage is full, items are ejected on top (works well with water collection systems)
 - Container contents (e.g. chests) drop on the ground like in vanilla
 - Remembers its progress when the chunk unloads or the world is reloaded
@@ -21,7 +21,7 @@ A simple quarry for Minecraft 26.3 (Fabric), inspired by Simple Quarries Plus.
 - Uses the pickaxe you insert: tool speed, Efficiency, Silk Touch, Fortune and Unbreaking work like vanilla, and the pickaxe takes durability damage
 - Runs on furnace fuel: one smelt in a furnace = 12 blocks (coal = 96, lava bucket = 1200); empty buckets go to storage
 - 24-slot internal storage; overflow is ejected on top
-- Hopper support: pickaxes from the back, fuel from the sides, storage can be pulled from below
+- Hopper support (left/right as seen when facing the front of the quarry): pickaxes from the back, fuel from the left, filler blocks from the right, and everything in storage can be pulled from below
 - Item filter (whitelist / blacklist / disabled) that works on the drops; filtered-out items are destroyed. Silk Touch drops are filtered as what they actually drop (e.g. stone, not cobblestone).
 - Speed upgrades I–IV: reduce the slowdown factor step by step (10 → 7 → 5 → 3 → 2). Speed V always mines 1 block per tick (instant mining), regardless of pickaxe and enchantments. Fuel use does not change: the same amount of fuel per block mined.
 - Area upgrades I–V: 25x25, 35x35, 45x45, 55x55 and 65x65. A new size takes effect from the next layer.

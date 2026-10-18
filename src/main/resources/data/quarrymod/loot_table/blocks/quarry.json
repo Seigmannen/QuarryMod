@@ -8,6 +8,13 @@
       "entries": [
         {
           "type": "minecraft:item",
+          "modifier": {
+            "type": "minecraft:copy_components",
+            "include": [
+              "quarrymod:filler_storage"
+            ],
+            "source": "block_entity"
+          },
           "name": "quarrymod:quarry"
         }
       ],

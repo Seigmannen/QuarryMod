@@ -2,6 +2,7 @@ package com.seigmannen.quarrymod;
 
 import com.seigmannen.quarrymod.block.ModBlocks;
 import com.seigmannen.quarrymod.block.entity.ModBlockEntities;
+import com.seigmannen.quarrymod.component.ModDataComponents;
 import com.seigmannen.quarrymod.item.ModItems;
 import com.seigmannen.quarrymod.menu.ModMenuTypes;
 import net.fabricmc.api.ModInitializer;
@@ -18,6 +19,8 @@ public class QuarryMod implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
+		// Registrer data-komponentene (fyll-lageret på quarry-itemet).
+		ModDataComponents.initialize();
 		// Registrer alle blokkene (og BlockItems) i moden.
 		ModBlocks.initialize();
 		// Registrer oppgraderings-itemene (etter blokkene, så de havner etter quarrien i creative-fanen).

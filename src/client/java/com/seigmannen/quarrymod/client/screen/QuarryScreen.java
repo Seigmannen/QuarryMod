@@ -4,6 +4,7 @@ import com.seigmannen.quarrymod.QuarryMod;
 import com.seigmannen.quarrymod.block.entity.QuarryBlockEntity;
 import com.seigmannen.quarrymod.item.ModItems;
 import com.seigmannen.quarrymod.menu.QuarryMenu;
+import java.util.List;
 import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
@@ -37,6 +38,7 @@ public class QuarryScreen extends AbstractContainerScreen<QuarryMenu> {
 	private static final int WHITELIST_WARNING_Y = 124;
 	private static final ItemStack PICKAXE_ICON = new ItemStack(Items.IRON_PICKAXE);
 	private static final ItemStack FUEL_ICON = new ItemStack(Items.COAL);
+	private static final ItemStack FILLER_ICON = new ItemStack(Items.COBBLESTONE);
 	// ModItems er alltid registrert før klienten åpner en GUI.
 	private static final ItemStack SPEED_UPGRADE_ICON = new ItemStack(ModItems.SPEED_UPGRADES[0]);
 	private static final ItemStack AREA_UPGRADE_ICON = new ItemStack(ModItems.AREA_UPGRADES[0]);
@@ -119,26 +121,52 @@ public class QuarryScreen extends AbstractContainerScreen<QuarryMenu> {
 		Slot fuelSlot = this.menu.getSlot(QuarryMenu.FUEL_SLOT);
 		Slot speedSlot = this.menu.getSlot(QuarryMenu.SPEED_UPGRADE_SLOT);
 		Slot areaSlot = this.menu.getSlot(QuarryMenu.AREA_UPGRADE_SLOT);
+		Slot fillerSlot = this.menu.getSlot(QuarryMenu.FILLER_SLOT);
 		drawGhostItem(graphics, pickaxeSlot, PICKAXE_ICON);
 		drawGhostItem(graphics, fuelSlot, FUEL_ICON);
 		drawGhostItem(graphics, speedSlot, SPEED_UPGRADE_ICON);
 		drawGhostItem(graphics, areaSlot, AREA_UPGRADE_ICON);
+		drawGhostItem(graphics, fillerSlot, FILLER_ICON);
 		// Items tegnes etter fills i samme lag, så vi går til et nytt lag før det grå laget legges over.
 		graphics.nextStratum();
 		drawGhostOverlay(graphics, pickaxeSlot);
 		drawGhostOverlay(graphics, fuelSlot);
 		drawGhostOverlay(graphics, speedSlot);
 		drawGhostOverlay(graphics, areaSlot);
+		drawGhostOverlay(graphics, fillerSlot);
+
+		// Antallet i fyll-lageret over fyll-slotten, i samme stil som item-antall. Nytt lag, så det ikke blir falmet.
+		// Ligger det et item i slotten (fyll-lageret er fullt), viser vi itemets eget antall i stedet.
+		int fillerCount = this.menu.getFillerCount();
+		if (fillerCount > 0 && !fillerSlot.hasItem()) {
+			graphics.nextStratum();
+			graphics.itemDecorations(this.font, FILLER_ICON, this.leftPos + fillerSlot.x, this.topPos + fillerSlot.y, shortCount(fillerCount));
+		}
 	}
 
-	// Tooltip over tomme upgrade-slots ("Speed Upgrade" / "Area Upgrade"), bare når man ikke holder noe.
+	/** Kort tall som får plass over en slot: 64, 999, 1.2k, 4.6k (rundet ned). */
+	private static String shortCount(int count) {
+		if (count < 1000) {
+			return Integer.toString(count);
+		}
+		int tenths = count / 100;
+		return tenths % 10 == 0 ? tenths / 10 + "k" : tenths / 10 + "." + tenths % 10 + "k";
+	}
+
+	// Tooltip over tomme upgrade-slots ("Speed Upgrade" / "Area Upgrade") og fyll-slotten, bare når man ikke holder noe.
 	@Override
 	protected void extractTooltip(GuiGraphicsExtractor graphics, int mouseX, int mouseY) {
 		super.extractTooltip(graphics, mouseX, mouseY);
 		if (this.hoveredSlot == null || this.hoveredSlot.hasItem() || !this.menu.getCarried().isEmpty()) {
 			return;
 		}
-		if (this.hoveredSlot.index == QuarryMenu.SPEED_UPGRADE_SLOT) {
+		if (this.hoveredSlot.index == QuarryMenu.FILLER_SLOT) {
+			// "Filler: 1234 / 4608" og en grå forklaring under.
+			graphics.setComponentTooltipForNextFrame(this.font, List.of(
+					Component.translatable("gui.quarrymod.slot.filler", this.menu.getFillerCount(), QuarryBlockEntity.FILLER_CAPACITY),
+					Component.translatable("gui.quarrymod.slot.filler_description").withStyle(ChatFormatting.GRAY)
+			), mouseX, mouseY);
+		} else if (this.hoveredSlot.index == QuarryMenu.SPEED_UPGRADE_SLOT) {
 			graphics.setTooltipForNextFrame(this.font, Component.translatable("gui.quarrymod.slot.speed_upgrade"), mouseX, mouseY);
 		} else if (this.hoveredSlot.index == QuarryMenu.AREA_UPGRADE_SLOT) {
 			graphics.setTooltipForNextFrame(this.font, Component.translatable("gui.quarrymod.slot.area_upgrade"), mouseX, mouseY);

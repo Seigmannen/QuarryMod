@@ -18,9 +18,9 @@ import org.jspecify.annotations.Nullable;
  * Menyen (server- og klientsiden av GUI-en). Den holder slotsene og synkroniserer innhold og tall.
  *
  * Slot-rekkefølge i menyen:
- * 0 = pickaxe, 1 = fuel, 2–25 = lager, 26 = speed-oppgradering, 27 = area-oppgradering,
- * 28–36 = filter (ghost), 37–63 = inventory, 64–72 = hotbar.
- * Slot 0–27 har samme nummer som i block entityen.
+ * 0 = pickaxe, 1 = fuel, 2–25 = lager, 26 = speed-oppgradering, 27 = area-oppgradering, 28 = fyll-slot,
+ * 29–37 = filter (ghost), 38–64 = inventory, 65–73 = hotbar.
+ * Slot 0–28 har samme nummer som i block entityen.
  */
 public class QuarryMenu extends AbstractContainerMenu {
 	public static final int PICKAXE_SLOT = QuarryBlockEntity.PICKAXE_SLOT;
@@ -29,10 +29,11 @@ public class QuarryMenu extends AbstractContainerMenu {
 	public static final int STORAGE_END = QuarryBlockEntity.STORAGE_END;                     // 26 (eksklusiv)
 	public static final int SPEED_UPGRADE_SLOT = QuarryBlockEntity.SPEED_UPGRADE_SLOT;       // 26
 	public static final int AREA_UPGRADE_SLOT = QuarryBlockEntity.AREA_UPGRADE_SLOT;         // 27
-	public static final int FILTER_START = QuarryBlockEntity.CONTAINER_SIZE;                 // 28
-	public static final int FILTER_END = FILTER_START + QuarryBlockEntity.FILTER_SIZE;       // 37
+	public static final int FILLER_SLOT = QuarryBlockEntity.FILLER_SLOT;                     // 28
+	public static final int FILTER_START = QuarryBlockEntity.CONTAINER_SIZE;                 // 29
+	public static final int FILTER_END = FILTER_START + QuarryBlockEntity.FILTER_SIZE;       // 38
 	public static final int PLAYER_START = FILTER_END;
-	public static final int PLAYER_END = PLAYER_START + 36;                                   // 73
+	public static final int PLAYER_END = PLAYER_START + 36;                                   // 74
 
 	/** Knapp-ID som sendes med clickMenuButton når filterknappen trykkes. */
 	public static final int BUTTON_CYCLE_FILTER = 0;
@@ -81,6 +82,9 @@ public class QuarryMenu extends AbstractContainerMenu {
 		this.addSlot(new UpgradeSlot(container, SPEED_UPGRADE_SLOT, 34, 137));
 		this.addSlot(new UpgradeSlot(container, AREA_UPGRADE_SLOT, 56, 137));
 
+		// Fyll-slot: det som legges her, flyttes inn i fyll-lageret av block entityen.
+		this.addSlot(new FillerSlot(container, FILLER_SLOT, 78, 137));
+
 		// Filter 3x3.
 		for (int r = 0; r < 3; r++) {
 			for (int c = 0; c < 3; c++) {
@@ -104,6 +108,11 @@ public class QuarryMenu extends AbstractContainerMenu {
 		int low = data.get(QuarryBlockEntity.DATA_BLOCKS_LOW) & 0xFFFF;
 		int high = data.get(QuarryBlockEntity.DATA_BLOCKS_HIGH) & 0xFFFF;
 		return (high << 16) | low;
+	}
+
+	/** Antall i fyll-lageret (maks 4608, så det får plass i en short; masken fjerner fortegnet). */
+	public int getFillerCount() {
+		return data.get(QuarryBlockEntity.DATA_FILLER) & 0xFFFF;
 	}
 
 	public int getFilterMode() {
@@ -164,7 +173,7 @@ public class QuarryMenu extends AbstractContainerMenu {
 	/**
 	 * Shift-klikk. Fra quarrien: til spillerens inventory.
 	 * Fra spilleren: oppgraderinger til sin slot, pickaxe til pickaxe-slotten, fuel til fuel-slotten,
-	 * fyllblokker til lageret, ellers ingenting.
+	 * fyllblokker til fyll-slotten, ellers ingenting.
 	 */
 	@Override
 	public ItemStack quickMoveStack(Player player, int index) {
@@ -194,9 +203,9 @@ public class QuarryMenu extends AbstractContainerMenu {
 			if (!moved && QuarryBlockEntity.isFuel(stack)) {
 				moved = this.moveItemStackTo(stack, FUEL_SLOT, FUEL_SLOT + 1, false);
 			}
-			// Fyllblokker til lageret.
+			// Fyllblokker til fyll-slotten.
 			if (!moved && QuarryBlockEntity.isFillerBlock(stack)) {
-				moved = this.moveItemStackTo(stack, STORAGE_START, STORAGE_END, false);
+				moved = this.moveItemStackTo(stack, FILLER_SLOT, FILLER_SLOT + 1, false);
 			}
 			if (!moved) {
 				return ItemStack.EMPTY;
@@ -276,9 +285,21 @@ public class QuarryMenu extends AbstractContainerMenu {
 		}
 	}
 
-	/** Lageret: spilleren kan ta ut alt, men bare legge inn fyllblokker. */
+	/** Lageret: spilleren kan bare ta ut. */
 	private static class OutputSlot extends Slot {
 		OutputSlot(Container container, int index, int x, int y) {
+			super(container, index, x, y);
+		}
+
+		@Override
+		public boolean mayPlace(ItemStack stack) {
+			return false;
+		}
+	}
+
+	/** Fyll-slotten: bare fyllblokker. */
+	private static class FillerSlot extends Slot {
+		FillerSlot(Container container, int index, int x, int y) {
 			super(container, index, x, y);
 		}
 

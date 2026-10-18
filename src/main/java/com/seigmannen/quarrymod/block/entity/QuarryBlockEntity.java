@@ -3,14 +3,23 @@ package com.seigmannen.quarrymod.block.entity;
 import com.seigmannen.quarrymod.QuarryMod;
 import com.seigmannen.quarrymod.block.QuarryBlock;
 import com.seigmannen.quarrymod.compat.MineEverythingCompat;
+import com.seigmannen.quarrymod.component.FillerStorage;
+import com.seigmannen.quarrymod.component.ModDataComponents;
 import com.seigmannen.quarrymod.item.ModItems;
 import com.seigmannen.quarrymod.menu.QuarryMenu;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.IntStream;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.NonNullList;
+import net.minecraft.core.component.DataComponentGetter;
+import net.minecraft.core.component.DataComponentMap;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
@@ -46,6 +55,7 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.storage.loot.providers.number.ints.ResolvableInt;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Block entity-en til quarrien. Her ligger all mining-logikken og dataene som skal huskes.
@@ -54,13 +64,16 @@ import net.minecraft.world.level.storage.ValueOutput;
  * - Kolonner lagres som 0 til størrelse - 1. Kolonne 0 er lengst til venstre sett fra en spiller som ser på fronten.
  * - Rader lagres som 0 til størrelse - 1. Rad 0 er lengst bak (motsatt side av fronten).
  *
- * Inventory: slot 0 = pickaxe, slot 1 = fuel, slot 2–25 = lager, slot 26 = speed-, slot 27 = area-oppgradering.
+ * Inventory: slot 0 = pickaxe, slot 1 = fuel, slot 2–25 = lager, slot 26 = speed-, slot 27 = area-oppgradering,
+ * slot 28 = fyll-slot (tømmes inn i fyll-lageret hver tick).
  * BaseContainerBlockEntity gjør at innholdet droppes automatisk når blokken brytes.
  * WorldlyContainer styrer hva hoppere får ta ut / sette inn fra hver side.
  * Filteret er en egen liste med kopier og er IKKE en del av inventoryet (så det droppes ikke).
+ * Fyll-lageret (opptil 4608 fyllblokker) er heller ikke en del av inventoryet. Det følger med quarry-itemet
+ * når blokken brytes (data-komponent som loot table-en kopierer, som en shulker box).
  *
  * Væske: før hvert lag skannes laget + ringen rett utenfor. Væske (og "alltid-vann"-blokker som kelp)
- * fylles med fyllblokker fra lageret, én om gangen i mining-fart. Waterlogged blokker tømmes for vann med en gang.
+ * fylles med fyllblokker (fyll-lageret først, så lageret), én om gangen i mining-fart. Waterlogged blokker tømmes for vann med en gang.
  * Mangler fyllblokker, venter quarrien (NEEDS_FILLER = blå front). Ringen mines aldri, så den blir en vegg.
  */
 public class QuarryBlockEntity extends BaseContainerBlockEntity implements WorldlyContainer {
@@ -85,8 +98,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	// --- Væskehåndtering ---
 	/** Items som kan brukes som fyllblokker mot væske (data/quarrymod/tags/item/filler_blocks.json). */
 	public static final TagKey<Item> FILLER_BLOCKS = TagKey.create(Registries.ITEM, QuarryMod.id("filler_blocks"));
-	/** En hopper under quarrien får ikke trekke ut fyllblokker hvis det blir færre enn dette igjen. */
-	public static final int FILLER_RESERVE = 64;
+	/** Hvor mange fyllblokker fyll-lageret har plass til totalt (72 stacks). */
+	public static final int FILLER_CAPACITY = 4608;
 	/** scanIndex-verdi som betyr "laget er ferdig skannet" (brukes for gamle lagringer midt i et lag). */
 	private static final int SCAN_DONE = Integer.MAX_VALUE;
 
@@ -104,15 +117,18 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	public static final int STORAGE_END = STORAGE_START + STORAGE_SIZE;  // 26 (eksklusiv)
 	public static final int SPEED_UPGRADE_SLOT = STORAGE_END;            // 26
 	public static final int AREA_UPGRADE_SLOT = STORAGE_END + 1;         // 27
-	public static final int CONTAINER_SIZE = STORAGE_END + 2;            // 28
+	public static final int FILLER_SLOT = STORAGE_END + 2;               // 28
+	public static final int CONTAINER_SIZE = STORAGE_END + 3;            // 29
 	public static final int FILTER_SIZE = 9;
 
 	/** Slotsene en hopper under quarrien kan trekke fra (bare lageret). */
 	private static final int[] STORAGE_SLOTS = IntStream.range(STORAGE_START, STORAGE_END).toArray();
 	/** Slotten en hopper på baksiden kan sette inn i. */
 	private static final int[] PICKAXE_SLOTS = {PICKAXE_SLOT};
-	/** Slotten en hopper på venstre/høyre side kan sette inn i. */
+	/** Slotten en hopper på venstre side kan sette inn i. */
 	private static final int[] FUEL_SLOTS = {FUEL_SLOT};
+	/** Slotten en hopper på høyre side kan sette inn i. */
+	private static final int[] FILLER_SLOTS = {FILLER_SLOT};
 	private static final int[] NO_SLOTS = new int[0];
 
 	// --- Status (synkroniseres til GUI-en via ContainerData) ---
@@ -135,7 +151,9 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	// Antall blokker fuelen rekker. ContainerData sendes som 16-bit (short), så tallet deles i to halvdeler.
 	public static final int DATA_BLOCKS_LOW = 2;
 	public static final int DATA_BLOCKS_HIGH = 3;
-	public static final int DATA_COUNT = 4;
+	// Antall i fyll-lageret. Maks 4608, så det får plass i én short.
+	public static final int DATA_FILLER = 4;
+	public static final int DATA_COUNT = 5;
 
 	private NonNullList<ItemStack> items = NonNullList.withSize(CONTAINER_SIZE, ItemStack.EMPTY);
 
@@ -149,6 +167,10 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	};
 	private int filterMode = FILTER_DISABLED;
 
+	// Fyll-lageret: item-type -> antall. Rekkefølgen beholdes, så det som kom inn først, brukes først.
+	private final Map<Item, Integer> fillerStorage = new LinkedHashMap<>();
+	private int fillerTotal = 0;
+
 	/** Tallene GUI-en trenger. Menyen sender dem automatisk til klienten når de endres. */
 	private final ContainerData data = new ContainerData() {
 		@Override
@@ -158,6 +180,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 				case DATA_FILTER_MODE -> filterMode;
 				case DATA_BLOCKS_LOW -> getRemainingBlocks() & 0xFFFF;
 				case DATA_BLOCKS_HIGH -> getRemainingBlocks() >>> 16;
+				case DATA_FILLER -> fillerTotal;
 				default -> 0;
 			};
 		}
@@ -205,6 +228,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		if (!(level instanceof ServerLevel serverLevel)) {
 			return;
 		}
+		// Det som ligger i fyll-slotten, flyttes inn i fyll-lageret (også når quarrien står stille).
+		quarry.pullFillerSlot();
 		// NEEDS_FILLER er bare true de tickene quarrien faktisk venter på fyllblokker.
 		boolean waitingForFiller = tickQuarry(serverLevel, pos, state, quarry);
 		setNeedsFiller(level, pos, waitingForFiller);
@@ -479,18 +504,15 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 				continue;
 			}
 			// Væske eller "alltid-vann"-blokk: vent hvis vi ikke har fyllblokker (posisjon og fremdrift beholdes).
-			int fillerSlot = findFillerSlot();
-			if (fillerSlot < 0) {
+			if (!hasFiller()) {
 				return true;
 			}
 			// Samme tid som å mine én blokk, men uten fuel-kostnad og uten slitasje på pickaxen.
 			fillProgress += 1.0F / ticksPerBlock(level, pickaxe);
 			if (fillProgress >= PROGRESS_DONE) {
-				ItemStack stack = items.get(fillerSlot);
-				BlockState filler = ((BlockItem) stack.getItem()).getBlock().defaultBlockState();
-				stack.shrink(1);
-				if (stack.isEmpty()) {
-					items.set(fillerSlot, ItemStack.EMPTY);
+				BlockState filler = takeFiller();
+				if (filler == null) {
+					return true;
 				}
 				// Erstatter blokken direkte, så kelp, sjøgress o.l. forsvinner uten drops.
 				level.setBlock(pos, filler, Block.UPDATE_ALL);
@@ -521,16 +543,83 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		return -1;
 	}
 
-	/** Totalt antall fyllblokker i lageret. */
-	private int countFillerBlocks() {
-		int count = 0;
-		for (int i = STORAGE_START; i < STORAGE_END; i++) {
-			ItemStack stack = items.get(i);
-			if (isFillerBlock(stack)) {
-				count += stack.getCount();
+	/** Om det finnes en fyllblokk i fyll-lageret eller i lageret. */
+	private boolean hasFiller() {
+		return fillerTotal > 0 || findFillerSlot() >= 0;
+	}
+
+	/** Tar én fyllblokk: fra fyll-lageret først, ellers fra lageret. null hvis begge er tomme. */
+	private @Nullable BlockState takeFiller() {
+		Iterator<Map.Entry<Item, Integer>> iterator = fillerStorage.entrySet().iterator();
+		if (iterator.hasNext()) {
+			Map.Entry<Item, Integer> entry = iterator.next();
+			BlockState filler = ((BlockItem) entry.getKey()).getBlock().defaultBlockState();
+			if (entry.getValue() <= 1) {
+				iterator.remove();
+			} else {
+				entry.setValue(entry.getValue() - 1);
+			}
+			fillerTotal--;
+			return filler;
+		}
+		int slot = findFillerSlot();
+		if (slot < 0) {
+			return null;
+		}
+		ItemStack stack = items.get(slot);
+		BlockState filler = ((BlockItem) stack.getItem()).getBlock().defaultBlockState();
+		stack.shrink(1);
+		if (stack.isEmpty()) {
+			items.set(slot, ItemStack.EMPTY);
+		}
+		return filler;
+	}
+
+	/** Legger så mange som får plass av stacken i fyll-lageret (bare fyllblokker). Returnerer antallet som kom inn. */
+	private int addToFillerStorage(ItemStack stack) {
+		if (!isFillerBlock(stack)) {
+			return 0;
+		}
+		int move = Math.min(stack.getCount(), FILLER_CAPACITY - fillerTotal);
+		if (move <= 0) {
+			return 0;
+		}
+		fillerStorage.merge(stack.getItem(), move, Integer::sum);
+		fillerTotal += move;
+		setChanged();
+		return move;
+	}
+
+	/** Flytter det som ligger i fyll-slotten inn i fyll-lageret, så langt det er plass. */
+	private void pullFillerSlot() {
+		ItemStack stack = items.get(FILLER_SLOT);
+		int moved = addToFillerStorage(stack);
+		if (moved > 0) {
+			stack.shrink(moved);
+			if (stack.isEmpty()) {
+				items.set(FILLER_SLOT, ItemStack.EMPTY);
 			}
 		}
-		return count;
+	}
+
+	/** Fyll-lageret i samme form som data-komponenten (brukes også ved lagring). */
+	private FillerStorage getFillerStorage() {
+		List<FillerStorage.Entry> entries = new ArrayList<>();
+		fillerStorage.forEach((item, count) -> entries.add(new FillerStorage.Entry(BuiltInRegistries.ITEM.wrapAsHolder(item), count)));
+		return new FillerStorage(entries);
+	}
+
+	/** Erstatter fyll-lageret. Bare blokk-items tas med, og aldri mer enn FILLER_CAPACITY totalt. */
+	private void setFillerStorage(FillerStorage storage) {
+		fillerStorage.clear();
+		fillerTotal = 0;
+		for (FillerStorage.Entry entry : storage.entries()) {
+			int count = Math.min(entry.count(), FILLER_CAPACITY - fillerTotal);
+			if (entry.item().value() instanceof BlockItem && count > 0) {
+				fillerStorage.merge(entry.item().value(), count, Integer::sum);
+				fillerTotal += count;
+			}
+		}
 	}
 
 	/** Blokker som quarrien ikke skal mine. */
@@ -578,6 +667,11 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 
 		// Filteret gjelder bare blokkens egne drops (etter Silk Touch/Fortune), ikke kisteinnhold eller fuel-rester.
 		for (ItemStack drop : drops) {
+			// Fyllblokker går først i fyll-lageret, før filteret (også om de står på blacklist).
+			drop.shrink(addToFillerStorage(drop));
+			if (drop.isEmpty()) {
+				continue;
+			}
 			if (passesFilter(drop)) {
 				storeOrSpit(level, drop);
 			} else if (FILTERED_ITEMS_DROP_ON_GROUND) {
@@ -701,9 +795,9 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		return stack.is(ItemTags.PICKAXES);
 	}
 
-	/** Items fra fyllblokk-taggen, som spilleren kan legge i lageret. */
+	/** Items fra fyllblokk-taggen som kan plasseres som blokk (fyll-slotten og fyll-lageret godtar bare disse). */
 	public static boolean isFillerBlock(ItemStack stack) {
-		return !stack.isEmpty() && stack.is(FILLER_BLOCKS);
+		return !stack.isEmpty() && stack.is(FILLER_BLOCKS) && stack.getItem() instanceof BlockItem;
 	}
 
 	/** Samme sjekk som ovnen bruker: items med COOKING_FUEL-komponenten kan brennes. */
@@ -738,7 +832,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		return new QuarryMenu(containerId, inventory, this);
 	}
 
-	// Hva som lovlig kan ligge i hver slot. I lageret kan spilleren bare legge inn fyllblokker.
+	// Hva som lovlig kan ligge i hver slot. Lageret fylles bare av quarrien selv.
 	// (Hoppere stoppes uansett av canPlaceItemThroughFace.)
 	@Override
 	public boolean canPlaceItem(int slot, ItemStack stack) {
@@ -747,14 +841,16 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 			case FUEL_SLOT -> isFuel(stack);
 			case SPEED_UPGRADE_SLOT -> ModItems.getSpeedLevel(stack) > 0;
 			case AREA_UPGRADE_SLOT -> ModItems.getAreaLevel(stack) > 0;
-			default -> slot >= STORAGE_START && slot < STORAGE_END && isFillerBlock(stack);
+			case FILLER_SLOT -> isFillerBlock(stack);
+			default -> false;
 		};
 	}
 
 	// --- Hoppere (WorldlyContainer) ---
 
 	// Undersiden: lageret (bare uttak). Baksiden: pickaxe-slotten (bare innsetting).
-	// Venstre/høyre: fuel-slotten (bare innsetting). Fronten og toppen: ingenting.
+	// Venstre: fuel-slotten. Høyre: fyll-slotten (bare innsetting). Fronten og toppen: ingenting.
+	// Venstre/høyre er sett fra en spiller som står foran quarrien og ser på fronten.
 	// Upgrade-slotsene er aldri med, så hoppere verken setter inn i eller trekker ut av dem.
 	@Override
 	public int[] getSlotsForFace(Direction side) {
@@ -764,8 +860,11 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		if (side == getBackSide()) {
 			return PICKAXE_SLOTS;
 		}
-		if (isSideFace(side)) {
+		if (side == getLeftSide()) {
 			return FUEL_SLOTS;
+		}
+		if (side == getLeftSide().getOpposite()) {
+			return FILLER_SLOTS;
 		}
 		return NO_SLOTS;
 	}
@@ -776,9 +875,13 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		if (side == getBackSide()) {
 			return slot == PICKAXE_SLOT && isPickaxe(stack) && items.get(PICKAXE_SLOT).isEmpty();
 		}
-		// Bare gyldig fuel gjennom venstre/høyre side.
-		if (isSideFace(side)) {
+		// Bare gyldig fuel gjennom venstre side.
+		if (side == getLeftSide()) {
 			return slot == FUEL_SLOT && isFuel(stack);
+		}
+		// Bare fyllblokker gjennom høyre side.
+		if (side == getLeftSide().getOpposite()) {
+			return slot == FILLER_SLOT && isFillerBlock(stack);
 		}
 		return false;
 	}
@@ -788,20 +891,43 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		return getBlockState().getValue(HorizontalDirectionalBlock.FACING).getOpposite();
 	}
 
-	/** Venstre eller høyre side sett fra FACING (de to horisontale sidene som verken er front eller bak). */
-	private boolean isSideFace(Direction side) {
-		Direction front = getBlockState().getValue(HorizontalDirectionalBlock.FACING);
-		return side == front.getClockWise() || side == front.getCounterClockWise();
+	/** Venstre side for en spiller som ser på fronten (samme retning som i getLayerPos). */
+	private Direction getLeftSide() {
+		return getBackSide().getCounterClockWise();
 	}
 
-	// Det som står under (hopper o.l.) kan trekke fra lageret, aldri fra pickaxe/fuel.
-	// Fyllblokker bare så lenge det blir minst FILLER_RESERVE igjen etterpå (en hopper tar ett item om gangen).
+	// Det som står under (hopper o.l.) kan trekke alt fra lageret, aldri fra de andre slotsene.
 	@Override
 	public boolean canTakeItemThroughFace(int slot, ItemStack stack, Direction side) {
-		if (side != Direction.DOWN || slot < STORAGE_START || slot >= STORAGE_END) {
-			return false;
+		return side == Direction.DOWN && slot >= STORAGE_START && slot < STORAGE_END;
+	}
+
+	// --- Fyll-lageret på quarry-itemet (som en shulker box) ---
+
+	// Når quarrien settes ned: hent fyll-lageret fra itemet.
+	@Override
+	protected void applyImplicitComponents(DataComponentGetter components) {
+		super.applyImplicitComponents(components);
+		FillerStorage storage = components.get(ModDataComponents.FILLER_STORAGE);
+		if (storage != null) {
+			setFillerStorage(storage);
 		}
-		return !isFillerBlock(stack) || countFillerBlocks() - 1 >= FILLER_RESERVE;
+	}
+
+	// Når quarrien brytes: loot table-en kopierer komponenten herfra til itemet (bare når lageret ikke er tomt).
+	@Override
+	protected void collectImplicitComponents(DataComponentMap.Builder components) {
+		super.collectImplicitComponents(components);
+		if (fillerTotal > 0) {
+			components.set(ModDataComponents.FILLER_STORAGE, getFillerStorage());
+		}
+	}
+
+	// Fyll-lageret ligger som komponent på itemet, så det skal ikke også ligge i block entity-dataene der.
+	@Override
+	public void removeComponentsFromTag(ValueOutput output) {
+		super.removeComponentsFromTag(output);
+		output.discard("FillerStorage");
 	}
 
 	// --- Lagring ---
@@ -822,6 +948,9 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		ContainerHelper.saveAllItems(output, items);
 		ContainerHelper.saveAllItems(output.child("Filter"), filter.getItems());
 		output.putInt("FilterMode", filterMode);
+		if (fillerTotal > 0) {
+			output.store("FillerStorage", FillerStorage.CODEC, getFillerStorage());
+		}
 	}
 
 	// Leser dataene tilbake når chunken lastes inn igjen.
@@ -846,6 +975,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		filter.getItems().replaceAll(stack -> ItemStack.EMPTY);
 		ContainerHelper.loadAllItems(input.childOrEmpty("Filter"), filter.getItems());
 		filterMode = Math.floorMod(input.getIntOr("FilterMode", FILTER_DISABLED), FILTER_MODE_COUNT);
+		// Gamle lagringer uten fyll-lager starter med det tomt.
+		setFillerStorage(input.read("FillerStorage", FillerStorage.CODEC).orElse(new FillerStorage(List.of())));
 		// Den gamle "MineBottomLayer"-nøkkelen (fra knappen i 0.10.0-beta) leses ikke lenger og forsvinner ved neste lagring.
 	}
 }
