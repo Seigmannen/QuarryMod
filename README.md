@@ -27,38 +27,20 @@ A simple quarry for Minecraft 26.3 (Fabric), inspired by Simple Quarries Plus.
 - Area upgrades I–V: 25x25, 35x35, 45x45, 55x55 and 65x65. A new size takes effect from the next layer.
 - Upgrade recipes: the previous tier in the center with 4 materials around it in a plus shape (iron, gold, emerald, diamond, netherite). Tier I uses a redstone block (speed) or an ender pearl (area) in the center.
 
-## Crafting
+### Quarry Recipe
 
-```
-R I R
-P D P
-R I R
-```
+![Quarry recipe](img/quarry.png)
 
-- **R** = Redstone Dust
-- **I** = Block of Iron
-- **P** = Diamond Pickaxe
-- **D** = Dropper
 
-### Upgrades
+### Upgrades Recipes
 
-```
-. X .
-X U X
-. X .
-```
-
-- **.** = empty
-- **X** = material
-- **U** = center item
-
-| Tier | U (center)                                  | X (material)    |
-|------|---------------------------------------------|-----------------|
-| I    | Redstone Block (speed) / Ender Pearl (area) | Iron Ingot      |
-| II   | Tier I upgrade of the same type             | Gold Ingot      |
-| III  | Tier II upgrade                             | Emerald         |
-| IV   | Tier III upgrade                            | Diamond         |
-| V    | Tier IV upgrade                             | Netherite Ingot |
+| Tier | Area Upgrades                                 | Speed Upgrades                                  |
+|------|-----------------------------------------------|-------------------------------------------------|
+| I    | ![Area Upgrade I](img/area_upgrade_i.png)     | ![Speed Upgrade I](img/speed_upgrade_i.png)     |
+| II   | ![Area Upgrade II](img/area_upgrade_ii.png)   | ![Speed Upgrade II](img/speed_upgrade_ii.png)   |
+| III  | ![Area Upgrade III](img/area_upgrade_iii.png) | ![Speed Upgrade III](img/speed_upgrade_iii.png) |
+| IV   | ![Area Upgrade IV](img/area_upgrade_iv.png)   | ![Speed Upgrade IV](img/speed_upgrade_iv.png)   |
+| V    | ![Area Upgrade V](img/area_upgrade_v.png)     | ![Speed Upgrade V](img/speed_upgrade_v.png)     |
 
 ## Compatibility
 
