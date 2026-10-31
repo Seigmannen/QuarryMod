@@ -654,7 +654,12 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		// så en spawner beholder mob-typen når loot table-en kopierer data fra den (Mine (Almost) Everything).
 		// Loot tables-ene til Mine (Almost) Everything sjekker selv pickaxen (netherite / Silk Touch på jern eller bedre).
 		// Som i vanilla: blokker som krever riktig verktøy (f.eks. diamond ore med steinpickaxe) gir ingenting.
-		List<ItemStack> drops = !targetState.requiresCorrectToolForDrops() || pickaxe.isCorrectToolForDrops(targetState)
+		// Unntak med Mine (Almost) Everything: blokker som moden lar pickaxen høste (f.eks. cobweb) godtas også.
+		// Dropsene kommer fortsatt fra loot table-en med pickaxen som verktøy.
+		boolean canHarvest = !targetState.requiresCorrectToolForDrops()
+				|| pickaxe.isCorrectToolForDrops(targetState)
+				|| MineEverythingCompat.canHarvestWith(level, targetState, target, pickaxe);
+		List<ItemStack> drops = canHarvest
 				? Block.getDrops(targetState, level, target, targetBlockEntity, null, pickaxe)
 				: List.of();
 

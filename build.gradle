@@ -34,10 +34,10 @@ dependencies {
 
 	// Mine (Almost) Everything (valgfri, se compat/MineEverythingCompat). Jar-filen ligger i libs/, så prosjektet bygger overalt.
 	// compileOnly: bare for å kompilere mot API-et. Kommer ikke med i jar-filen eller publiseringen (ingen include).
-	compileOnly files("libs/mineeverything-1.2.0.jar")
+	compileOnly files("libs/mineeverything-1.4.0.jar")
 	// localRuntime: bare med i runClient/runServer i dev. Kjør uten den med: gradlew runClient -PnoMineEverything
 	if (!project.hasProperty("noMineEverything")) {
-		localRuntime files("libs/mineeverything-1.2.0.jar")
+		localRuntime files("libs/mineeverything-1.4.0.jar")
 	}
 }
 

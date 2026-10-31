@@ -29,6 +29,9 @@ public final class MineEverythingCompat {
 	 */
 	private static volatile boolean hasCanMineUnbreakable = true;
 
+	/** Om den installerte versjonen har MineEverythingApi.canHarvestWith. Settes til false ved NoSuchMethodError. */
+	private static volatile boolean hasCanHarvestWith = true;
+
 	/** Bare for eldre versjoner: taggen fra Mine (Almost) Everything (bedrock, reinforced deepslate). Trygg uten moden. */
 	private static final TagKey<Block> NETHERITE_MINEABLE =
 			TagKey.create(Registries.BLOCK, Identifier.fromNamespaceAndPath(MOD_ID, "netherite_mineable"));
@@ -55,5 +58,22 @@ public final class MineEverythingCompat {
 		// Gammel logikk: blokken er i taggen, pickaxen er netherite, og /mae tillater den her.
 		return state.is(NETHERITE_MINEABLE) && pickaxe.is(Items.NETHERITE_PICKAXE)
 				&& MineEverythingApi.isAllowed(level, state, pos);
+	}
+
+	/**
+	 * Om Mine (Almost) Everything sier at pickaxen kan høste blokken (f.eks. cobweb), selv om vanilla-sjekken
+	 * (isCorrectToolForDrops) sier nei. Alltid false uten moden, eller med en eldre versjon som mangler metoden.
+	 */
+	public static boolean canHarvestWith(Level level, BlockState state, BlockPos pos, ItemStack pickaxe) {
+		if (!LOADED || !hasCanHarvestWith) {
+			return false;
+		}
+		try {
+			return MineEverythingApi.canHarvestWith(level, state, pos, pickaxe);
+		} catch (NoSuchMethodError e) {
+			// Eldre Mine (Almost) Everything uten metoden: bare vanilla-sjekken fra nå av.
+			hasCanHarvestWith = false;
+			return false;
+		}
 	}
 }
