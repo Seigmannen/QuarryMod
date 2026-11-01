@@ -75,6 +75,9 @@ import org.jspecify.annotations.Nullable;
  * Væske: før hvert lag skannes laget + ringen rett utenfor. Væske (og "alltid-vann"-blokker som kelp)
  * fylles med fyllblokker (fyll-lageret først, så lageret), én om gangen i mining-fart. Waterlogged blokker tømmes for vann med en gang.
  * Mangler fyllblokker, venter quarrien (NEEDS_FILLER = blå front). Ringen mines aldri, så den blir en vegg.
+ * Mens laget mines, skannes ringen (for dette laget og opptil RESCAN_LAYERS_ABOVE lag over) på nytt omtrent
+ * hvert sekund, så væske som siver inn gjennom veggen senere, også blir fylt. Væske i en posisjon som skal mines,
+ * fylles først og mines deretter som en vanlig blokk.
  */
 public class QuarryBlockEntity extends BaseContainerBlockEntity implements WorldlyContainer {
 	/**
@@ -102,6 +105,16 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	public static final int FILLER_CAPACITY = 4608;
 	/** scanIndex-verdi som betyr "laget er ferdig skannet" (brukes for gamle lagringer midt i et lag). */
 	private static final int SCAN_DONE = Integer.MAX_VALUE;
+	/** Hvor mange lag over laget som mines, som også får ringen skannet på nytt (aldri over lag 0). */
+	private static final int RESCAN_LAYERS_ABOVE = 5;
+	/** Ticks mellom hver ny skanning av ringene (20 = omtrent ett sekund). */
+	private static final int RESCAN_INTERVAL = 20;
+	/** Maks antall ring-posisjoner som sjekkes per tick, så store områder fordeles over flere ticks. */
+	private static final int RESCAN_CHECKS_PER_TICK = 128;
+	// Resultater fra rescanRings.
+	private static final int RESCAN_FREE = 0;      // ingenting å gjøre nå, mining kan fortsette
+	private static final int RESCAN_FILLING = 1;   // fyller en posisjon, mining venter
+	private static final int RESCAN_NO_FILLER = 2; // fant væske, men har ingen fyllblokker
 
 	// --- Fuel ---
 	/** Én smelting i en ovn (200 ticks brenntid) = 12 blokker, så hver tick brenntid gir 12 poeng. */
@@ -212,6 +225,12 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 	private int scanIndex = 0;
 	// Fremdrift (0 til 1) på fyllblokken som plasseres nå under skanningen.
 	private float fillProgress = 0.0F;
+	// Ny skanning av ringene: om en runde pågår, hvilket lag (0 = laget som mines, 1 = laget over, ...),
+	// hvor langt rundt ringen vi har kommet, og ticks til neste runde.
+	private boolean rescanActive = false;
+	private int rescanOffset = 0;
+	private int rescanIndex = 0;
+	private int rescanCooldown = 0;
 	private boolean finished = false;
 	// Internt fuel-lager i poeng (heltall, så vi slipper avrunding). Long i tilfelle mod-fuel med enorm brenntid.
 	private long fuelStored = 0;
@@ -256,6 +275,15 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		}
 
 		boolean waitingForFiller = false;
+		// Ny skanning av ringene mens laget mines (bare når førstegangsskanningen er ferdig og det er fuel).
+		// Fyller den noe, venter miningen til fyllingen er ferdig.
+		if (quarry.layerSize != 0 && quarry.isScanDone() && quarry.ensureFuel(level)) {
+			int rescan = quarry.rescanRings(level, state, pickaxe);
+			if (rescan != RESCAN_FREE) {
+				quarry.setChanged();
+				return rescan == RESCAN_NO_FILLER;
+			}
+		}
 		int skipped = 0;
 		while (true) {
 			// Nytt lag: lås størrelsen fra area-oppgraderingen som står i nå.
@@ -297,6 +325,30 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 			}
 
 			BlockState targetState = level.getBlockState(target);
+
+			// Væske der vi skal mine: fyll den (samme regler som skanningen). Fyllblokken mines så som vanlig.
+			if (isFluidBlock(targetState)) {
+				if (!quarry.ensureFuel(level)) {
+					break;
+				}
+				if (!quarry.hasFiller()) {
+					waitingForFiller = true;
+					break;
+				}
+				// Bruker mining-fremdriften (nullstilles når vi går videre), men ingen fuel og ingen slitasje.
+				quarry.progress += 1.0F / quarry.ticksPerBlock(level, pickaxe);
+				if (quarry.progress >= PROGRESS_DONE) {
+					BlockState filler = quarry.takeFiller();
+					if (filler == null) {
+						waitingForFiller = true;
+						break;
+					}
+					level.setBlock(target, filler, Block.UPDATE_ALL);
+					quarry.progress = 0.0F;
+				}
+				break;
+			}
+
 			if (quarry.shouldSkip(targetState, level, target, pickaxe)) {
 				// Hopp over gratis (koster ingen tid) og gå videre til neste posisjon.
 				quarry.advance();
@@ -427,11 +479,11 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		int radius = layerSize / 2;
 		// Rad 0 er radius blokker bak, siste rad er radius blokker foran.
 		// Kolonne 0 er radius blokker til venstre, siste kolonne radius til høyre.
-		return getLayerPos(state, radius - row, radius - column);
+		return getLayerPos(state, layer, radius - row, radius - column);
 	}
 
-	/** Posisjonen på laget vi er på, gitt antall blokker bak og til venstre for midten (negativt = foran/høyre). */
-	private BlockPos getLayerPos(BlockState state, int backOffset, int leftOffset) {
+	/** Posisjonen på et lag (0 = rett under quarrien), gitt antall blokker bak og til venstre for midten (negativt = foran/høyre). */
+	private BlockPos getLayerPos(BlockState state, int layerIndex, int backOffset, int leftOffset) {
 		Direction front = state.getValue(HorizontalDirectionalBlock.FACING);
 		// En spiller som ser på fronten, ser i motsatt retning av fronten.
 		// "Bak" quarrien er altså samme retning som spilleren ser.
@@ -440,7 +492,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		Direction left = back.getCounterClockWise();
 
 		return this.worldPosition
-				.below(1 + layer)
+				.below(1 + layerIndex)
 				.relative(back, backOffset)
 				.relative(left, leftOffset);
 	}
@@ -460,6 +512,8 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 				// Neste lag henter størrelsen på nytt fra area-oppgraderingen, og skannes på nytt.
 				layerSize = 0;
 				scanIndex = 0;
+				// Ny skanning av ringene starter forfra på det nye laget.
+				rescanActive = false;
 			}
 		}
 	}
@@ -486,7 +540,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		while (scanIndex < side * side) {
 			int c = scanIndex % side;
 			int r = scanIndex / side;
-			BlockPos pos = getLayerPos(state, radius - r, radius - c);
+			BlockPos pos = getLayerPos(state, layer, radius - r, radius - c);
 			// Chunken er ikke lastet: vent her og fortsett neste tick.
 			if (!level.isLoaded(pos)) {
 				return false;
@@ -522,6 +576,96 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 			return false;
 		}
 		return false;
+	}
+
+	/**
+	 * Skanner ringen rundt laget som mines, pluss ringene for opptil RESCAN_LAYERS_ABOVE lag over (aldri over lag 0).
+	 * En ny runde starter omtrent hvert sekund, og maks RESCAN_CHECKS_PER_TICK posisjoner sjekkes per tick.
+	 * Væske fylles som i scanLayer (fyll-lageret, mining-fart, ingen fuel/slitasje); waterlogged tømmes med en gang.
+	 * Ringene over bruker størrelsen på laget som mines nå (størrelsen på tidligere lag lagres ikke).
+	 * Posisjoner i chunks som ikke er lastet, hoppes over.
+	 */
+	private int rescanRings(ServerLevel level, BlockState state, ItemStack pickaxe) {
+		if (rescanCooldown > 0) {
+			rescanCooldown--;
+		}
+		// Ingen runde pågår: start en ny når nedtellingen er ferdig.
+		if (!rescanActive) {
+			if (rescanCooldown > 0) {
+				return RESCAN_FREE;
+			}
+			rescanActive = true;
+			rescanCooldown = RESCAN_INTERVAL;
+			rescanOffset = 0;
+			rescanIndex = 0;
+			fillProgress = 0.0F;
+		}
+		int edge = layerSize + 1;   // sidelengden på ringen minus 1
+		int perimeter = 4 * edge;   // antall posisjoner i ringen
+		int radius = layerSize / 2 + 1;
+		int maxOffset = Math.min(RESCAN_LAYERS_ABOVE, layer);
+		int checks = 0;
+		while (rescanOffset <= maxOffset) {
+			// Ferdig med denne ringen: gå ett lag opp.
+			if (rescanIndex >= perimeter) {
+				rescanOffset++;
+				rescanIndex = 0;
+				continue;
+			}
+			if (checks >= RESCAN_CHECKS_PER_TICK) {
+				return RESCAN_FREE;
+			}
+			checks++;
+			// Rundt ringen: øverste rad, høyre kolonne, nederste rad, venstre kolonne.
+			int edgeNumber = rescanIndex / edge;
+			int step = rescanIndex % edge;
+			int c = switch (edgeNumber) {
+				case 0 -> step;
+				case 1 -> edge;
+				case 2 -> edge - step;
+				default -> 0;
+			};
+			int r = switch (edgeNumber) {
+				case 0 -> 0;
+				case 1 -> step;
+				case 2 -> edge;
+				default -> edge - step;
+			};
+			BlockPos pos = getLayerPos(state, layer - rescanOffset, radius - r, radius - c);
+			if (!level.isLoaded(pos)) {
+				rescanIndex++;
+				continue;
+			}
+			BlockState target = level.getBlockState(pos);
+			// Waterlogged: fjern vannet med en gang, som i scanLayer.
+			if (target.hasProperty(BlockStateProperties.WATERLOGGED) && target.getValue(BlockStateProperties.WATERLOGGED)) {
+				level.setBlock(pos, target.setValue(BlockStateProperties.WATERLOGGED, false), Block.UPDATE_ALL);
+				rescanIndex++;
+				continue;
+			}
+			// Ingen væske (eller den forsvant mens vi fylte): videre, og glem eventuell fremdrift.
+			if (!isFluidBlock(target)) {
+				fillProgress = 0.0F;
+				rescanIndex++;
+				continue;
+			}
+			if (!hasFiller()) {
+				return RESCAN_NO_FILLER;
+			}
+			fillProgress += 1.0F / ticksPerBlock(level, pickaxe);
+			if (fillProgress >= PROGRESS_DONE) {
+				BlockState filler = takeFiller();
+				if (filler == null) {
+					return RESCAN_NO_FILLER;
+				}
+				level.setBlock(pos, filler, Block.UPDATE_ALL);
+				fillProgress = 0.0F;
+				rescanIndex++;
+			}
+			return RESCAN_FILLING;
+		}
+		rescanActive = false;
+		return RESCAN_FREE;
 	}
 
 	/**
@@ -632,10 +776,7 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		if (state.isAir()) {
 			return true;
 		}
-		// Væske og "alltid-vann"-blokker (som skanningen ikke fikk fylt). Waterlogged blokker mines som normalt.
-		if (isFluidBlock(state)) {
-			return true;
-		}
+		// (Væske og "alltid-vann"-blokker fylles i tickQuarry før vi kommer hit. Waterlogged blokker mines som normalt.)
 		// Blokker som ikke kan knuses i vanilla (hardhet under 0), f.eks. bedrock og barrier.
 		// Unntak med Mine (Almost) Everything: bedrock med netherite pickaxe, hvis /mae tillater det.
 		// Reinforced deepslate, budding amethyst og spawner kan knuses i vanilla og mines som vanlige blokker;
@@ -948,6 +1089,10 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		output.putFloat("MiningProgress", progress);
 		output.putInt("ScanIndex", scanIndex);
 		output.putFloat("FillProgress", fillProgress);
+		output.putBoolean("RescanActive", rescanActive);
+		output.putInt("RescanOffset", rescanOffset);
+		output.putInt("RescanIndex", rescanIndex);
+		output.putInt("RescanCooldown", rescanCooldown);
 		output.putBoolean("Finished", finished);
 		output.putLong("FuelStored", fuelStored);
 		ContainerHelper.saveAllItems(output, items);
@@ -973,6 +1118,11 @@ public class QuarryBlockEntity extends BaseContainerBlockEntity implements World
 		// Gamle lagringer uten ScanIndex som er midt i et lag: det laget skannes ikke, bare de neste.
 		scanIndex = input.getIntOr("ScanIndex", column > 0 || row > 0 ? SCAN_DONE : 0);
 		fillProgress = input.getFloatOr("FillProgress", 0.0F);
+		// Gamle lagringer uten disse starter en ny runde med en gang.
+		rescanActive = input.getBooleanOr("RescanActive", false);
+		rescanOffset = input.getIntOr("RescanOffset", 0);
+		rescanIndex = input.getIntOr("RescanIndex", 0);
+		rescanCooldown = input.getIntOr("RescanCooldown", 0);
 		finished = input.getBooleanOr("Finished", false);
 		fuelStored = input.getLongOr("FuelStored", 0L);
 		items = NonNullList.withSize(CONTAINER_SIZE, ItemStack.EMPTY);
